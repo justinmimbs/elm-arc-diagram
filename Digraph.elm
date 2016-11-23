@@ -1,21 +1,36 @@
-module Digraph exposing (..)
+module Digraph exposing
+  ( Node, Edge, Path, AdjacencyList
+  , topologicalRank
+  , toAdjacencyList
+  , pathsFrom
+  , findCycles
+  )
 
 import Dict exposing (Dict)
 import Set exposing (Set)
 
 
+type alias Node =
+  Int
+
+
 type alias Edge =
-  (Int, Int)
+  (Node, Node)
 
 
 type alias Path =
-  List Int
+  List Node
+
+
+type alias AdjacencyList =
+  Dict Node (List Node)
+
 
 
 {-| From a set of edges, get the set of nodes with no incoming edges.
 -}
-noIncoming : Set Edge -> Set Int
-noIncoming edges =
+sourceNodes : Set Edge -> Set Node
+sourceNodes edges =
   Set.diff
     (edges |> Set.map Tuple.first)
     (edges |> Set.map Tuple.second)
@@ -24,13 +39,13 @@ noIncoming edges =
 {-| From a set of edges, get a dictionary of (node -> topological rank) if the
 edges are acyclic.
 -}
-topologicalRank : Set Edge -> Result String (Dict Int Int)
+topologicalRank : Set Edge -> Result String (Dict Node Int)
 topologicalRank edges =
   let
     (remainingEdges, rankedNodes) =
       topologicalRankHelp
         1
-        (noIncoming edges)
+        (sourceNodes edges)
         edges
         Dict.empty
   in
@@ -40,7 +55,7 @@ topologicalRank edges =
       Err "Graph must be acyclic to be topologically ranked"
 
 
-topologicalRankHelp : Int -> Set Int -> Set Edge -> Dict Int Int -> (Set Edge, Dict Int Int)
+topologicalRankHelp : Int -> Set Node -> Set Edge -> Dict Node Int -> (Set Edge, Dict Node Int)
 topologicalRankHelp rank addNodes edges rankedNodes =
   if Set.isEmpty addNodes then
     (edges, rankedNodes)
@@ -71,22 +86,22 @@ topologicalRankHelp rank addNodes edges rankedNodes =
         newRankedNodes
 
 
-{-| Convert a set of edges to a mapping of (source node -> list of target nodes).
+{-| Convert a set of edges to a mapping of (x node -> list of y nodes).
 -}
-toDict : Set Edge -> Dict Int (List Int)
-toDict =
+toAdjacencyList : Set Edge -> AdjacencyList
+toAdjacencyList =
   Set.foldl
-    (\(a, b) ->
+    (\(x, y) ->
       Dict.update
-        a
-        (Maybe.withDefault [] >> (::) b >> Just)
+        x
+        (Maybe.withDefault [] >> (::) y >> Just)
     )
     Dict.empty
 
 
 {-| List all paths in the graph from a given node. Cyclic paths are included.
 -}
-pathsFrom : Int -> Dict Int (List Int) -> List Path
+pathsFrom : Node -> AdjacencyList -> List Path
 pathsFrom =
   filterPathsFrom (always True)
 
@@ -94,14 +109,14 @@ pathsFrom =
 {-| Like `pathsFrom`, but accepts a predicate function used to determine which
 nodes to follow.
 -}
-filterPathsFrom : (Int -> Bool) -> Int -> Dict Int (List Int) -> List Path
-filterPathsFrom pred n dict =
-  filterPathsFromHelp pred dict [] n
+filterPathsFrom : (Node -> Bool) -> Node -> AdjacencyList -> List Path
+filterPathsFrom pred n ysByX =
+  filterPathsFromHelp pred ysByX [] n
     |> List.map List.reverse
 
 
-filterPathsFromHelp : (Int -> Bool) -> Dict Int (List Int) -> Path -> Int -> List Path
-filterPathsFromHelp pred dict prePath n =
+filterPathsFromHelp : (Node -> Bool) -> AdjacencyList -> Path -> Node -> List Path
+filterPathsFromHelp pred ysByX prePath n =
   let
     path =
       n :: prePath
@@ -110,11 +125,11 @@ filterPathsFromHelp pred dict prePath n =
       -- path has a cycle; stop following
       [ path ]
     else
-      Dict.get n dict
+      Dict.get n ysByX
         |> Maybe.map
             -- follow nodes
             (List.filter pred
-              >> List.concatMap (filterPathsFromHelp pred dict path))
+              >> List.concatMap (filterPathsFromHelp pred ysByX path))
         |> Maybe.withDefault
             -- path has reached terminal node
             [ path ]
@@ -127,12 +142,12 @@ edges). An acyclic graph has no 2-core.
 degenerate : Set Edge -> Set Edge
 degenerate edges =
   let
-    sources = Set.map Tuple.first edges
-    targets = Set.map Tuple.second edges
+    xs = edges |> Set.map Tuple.first
+    ys = edges |> Set.map Tuple.second
     edges2 =
       Set.filter
-        (\(s, t) ->
-          Set.member s targets && Set.member t sources
+        (\(x, y) ->
+          Set.member x ys && Set.member y xs
         )
         edges
   in
@@ -142,13 +157,8 @@ degenerate edges =
       degenerate edges2
 
 
-last : List a -> Maybe a
-last list =
-  list
-    |> List.drop (List.length list - 1)
-    |> List.head
-
-
+{-| List all unique simple cycles.
+-}
 findCycles : Set Edge -> List Path
 findCycles edges =
   let
@@ -158,24 +168,27 @@ findCycles edges =
       []
     else
       let
-        sources = Set.map Tuple.first edges2
-        dict = toDict edges2
+        xs = Set.map Tuple.first edges2
+        ysByX = toAdjacencyList edges2
       in
-        sources
+        xs
           |> Set.toList
           |> List.concatMap
-              (\n ->
-                {- Only follow nodes >= n; this is an optimization ensuring we
-                only look for cycles in canonical order (i.e. the path starts
+              (\x ->
+                {- Only follow nodes >= x; this is an optimization ensuring we
+                only look for cycles in a canonical order (i.e. the path starts
                 and ends with the least node).
                 -}
-                filterPathsFrom ((<=) n) n dict
-                  |> List.filter isCanonicalCycle
+                filterPathsFrom ((<=) x) x ysByX
+                  |> List.filter isSimpleCycle
               )
 
 
-isCanonicalCycle : Path -> Bool
-isCanonicalCycle path =
+{-| Does path start and end at the same node? (This does not check for any
+repeated nodes in between.)
+-}
+isSimpleCycle : Path -> Bool
+isSimpleCycle path =
   Maybe.map2
     (==)
     (List.head path)
@@ -183,68 +196,10 @@ isCanonicalCycle path =
   |> Maybe.withDefault False
 
 
--- examples
+-- List extra
 
-example : Set Edge
-example =
-  Set.fromList
-    [ ( 3,  4)
-    , ( 3,  8)
-    , ( 3, 10)
-    , ( 5, 11)
-    , ( 7,  8)
-    , ( 7, 11)
-    , ( 8,  9)
-    , ( 9,  2)
-    --, ( 9,  5) -- make cycle
-    , (11,  2)
-    , (11,  9)
-    , (11, 10)
-    ]
-
-
-example2 : Set Edge
-example2 =
-  Set.fromList
-    [ ( 2,  3)
-    , ( 3,  4)
-    , ( 3,  8)
-    , ( 3,  9)
-    , ( 3, 10)
-    , ( 5, 11)
-    , ( 7,  8)
-    , ( 7, 11)
-    , ( 8,  9)
-    , ( 9,  2)
-    , ( 9,  5)
-    , (11,  2)
-    , (11,  9)
-    , (11, 10)
-    ]
-
-example3 : Set Edge
-example3 =
-  Set.fromList
-    [ (1, 2)
-    , (1, 3)
-    , (2, 4)
-    , (2, 6)
-    , (3, 5)
-    , (4, 1)
-    , (6, 7)
-    , (6, 8)
-    ]
-
-
-ranked =
-  topologicalRank example2
-
-
-paths =
-  example3
-    |> toDict
-    |> pathsFrom 1
-
-
-cycles =
-  findCycles example
+last : List a -> Maybe a
+last list =
+  list
+    |> List.drop (List.length list - 1)
+    |> List.head
