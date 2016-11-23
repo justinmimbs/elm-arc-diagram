@@ -2,6 +2,8 @@ module Digraph exposing
   ( Node, Edge, Path, AdjacencyList
   , topologicalRank
   , toAdjacencyList
+  , fromAdjacencyList
+  , transpose
   , pathsFrom
   , findCycles
   )
@@ -23,8 +25,7 @@ type alias Path =
 
 
 type alias AdjacencyList =
-  Dict Node (List Node)
-
+  Dict Node (Set Node)
 
 
 {-| From a set of edges, get the set of nodes with no incoming edges.
@@ -86,7 +87,7 @@ topologicalRankHelp rank addNodes edges rankedNodes =
         newRankedNodes
 
 
-{-| Convert a set of edges to a mapping of (x node -> list of y nodes).
+{-| Convert a set of edges to a mapping of (x node -> set of y nodes).
 -}
 toAdjacencyList : Set Edge -> AdjacencyList
 toAdjacencyList =
@@ -94,7 +95,33 @@ toAdjacencyList =
     (\(x, y) ->
       Dict.update
         x
-        (Maybe.withDefault [] >> (::) y >> Just)
+        (Maybe.withDefault Set.empty >> Set.insert y >> Just)
+    )
+    Dict.empty
+
+
+fromAdjacencyList : AdjacencyList -> Set Edge
+fromAdjacencyList =
+  Dict.foldl
+    (\x ys ->
+      Set.union
+        (Set.map ((,) x) ys)
+    )
+    Set.empty
+
+
+transpose : AdjacencyList -> AdjacencyList
+transpose =
+  Dict.foldl
+    (\x ys xsByY ->
+      Set.foldl
+        (\y ->
+          Dict.update
+            y
+            (Maybe.withDefault Set.empty >> Set.insert x >> Just)
+        )
+        xsByY
+        ys
     )
     Dict.empty
 
@@ -127,8 +154,9 @@ filterPathsFromHelp pred ysByX prePath n =
     else
       Dict.get n ysByX
         |> Maybe.map
-            -- follow nodes
-            (List.filter pred
+            -- follow each node in set
+            (Set.filter pred
+              >> Set.toList
               >> List.concatMap (filterPathsFromHelp pred ysByX path))
         |> Maybe.withDefault
             -- path has reached terminal node
