@@ -1,11 +1,13 @@
 module Digraph exposing
   ( Node, Edge, Path, AdjacencyList
   , topologicalRank
+  , topologicalSortBy
   , toAdjacencyList
   , fromAdjacencyList
   , transpose
   , pathsFrom
   , findCycles
+  , degree
   )
 
 import Dict exposing (Dict)
@@ -85,6 +87,31 @@ topologicalRankHelp rank addNodes edges rankedNodes =
         addNodesNext
         remainingEdges
         newRankedNodes
+
+
+{-| From topologically-ranked nodes, get a well-ordered list by providing a
+(Node -> comparable) function to sort same-ranked nodes by.
+-}
+topologicalSortBy : (Node -> comparable) -> Dict Node Int -> List Node
+topologicalSortBy toComparable =
+  invertDict
+    >> Dict.values
+    >> List.concatMap
+        (Set.toList >> List.sortBy toComparable)
+
+
+{-| Given a Dict x y, collect a Set x for each y. Assume the Dict represents a
+surjective mapping.
+-}
+invertDict : Dict comparable comparable1 -> Dict comparable1 (Set comparable)
+invertDict =
+  Dict.foldl
+    (\v k ->
+        Dict.update
+          k
+          (Maybe.withDefault Set.empty >> Set.insert v >> Just)
+    )
+    Dict.empty
 
 
 {-| Convert a set of edges to a mapping of (x node -> set of y nodes).
@@ -222,6 +249,21 @@ isSimpleCycle path =
     (List.head path)
     (last path)
   |> Maybe.withDefault False
+
+
+degree : AdjacencyList -> Node -> Int
+degree adjList =
+  (flip Dict.get) adjList >> Maybe.map Set.size >> Maybe.withDefault 0
+
+
+{-
+-- TODO Does this belong here?
+degreePair : AdjacencyList -> AdjacencyList ->  Node -> (Int, Int)
+degreePair incoming outgoing n =
+  (,)
+    (degree incoming n)
+    (degree outgoing n)
+-}
 
 
 -- List extra
