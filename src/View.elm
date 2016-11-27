@@ -1,34 +1,12 @@
-module Main exposing (..)
+module View exposing (view)
 
 import Dict exposing (Dict)
 import Digraph exposing (Node, Edge, AdjacencyList, toAdjacencyList, transpose, degree, topologicalRank, topologicalSortBy)
 import Html exposing (Html)
 import Html.Attributes
 import Set exposing (Set)
-import Svg exposing (Svg, svg, g, path, rect)
+import Svg exposing (Svg, svg, g, path, rect, text_, text)
 import Svg.Attributes exposing (x, y, width, height, transform, strokeLinecap, d, stroke, fill)
-
-
-imports : Set Edge
-imports =
-  Set.fromList
-    [ (1, 2)
-    , (1, 3)
-    , (1, 8)
-    , (1, 9)
-    , (2, 3)
-    , (2, 4)
-    , (3, 5)
-    , (3, 8)
-    , (3, 9)
-    , (4, 5)
-    , (4, 6)
-    , (4, 7)
-    , (4, 8)
-    , (5, 9)
-    , (6, 8)
-    , (6, 9)
-    ]
 
 
 type alias Config =
@@ -39,33 +17,13 @@ type alias Config =
   }
 
 
-main : Html a
-main =
-  let
-    edges = imports |> Set.map (\(a, b) -> (b, a)) -- reverse edges
-    config =
-      { edgeSpacing = 2
-      , nodePadding = 4
-      , yMinSpacing = 20
-      , edgeRadius = 4
-      }
-  in
-    Html.div
-      [ Html.Attributes.style [ ("margin", "40px") ]
-      ]
-      [ edges
-          |> topologicalRank
-          |> unpack
-              Html.text
-              (view config edges)
-      ]
-
-
-unpack : (e -> x) -> (a -> x) -> Result e a -> x
-unpack fromErr fromOk result =
-  case result of
-    Err e -> fromErr e
-    Ok a  -> fromOk a
+defaultConfig : Config
+defaultConfig =
+  { edgeSpacing = 2
+  , nodePadding = 4
+  , yMinSpacing = 20
+  , edgeRadius = 4
+  }
 
 
 functionFromDict : v -> Dict comparable v -> comparable -> v
@@ -133,8 +91,13 @@ layoutEdges edges ordered =
     |> Tuple.first
 
 
-view : Config -> Set Edge -> Dict Node Int -> Html a
-view config edges nodeToRank =
+view : (Node -> String) -> Set Edge -> Dict Node Int -> Html a
+view =
+  viewWithConfig defaultConfig
+
+
+viewWithConfig : Config -> (Node -> String) -> Set Edge -> Dict Node Int -> Html a
+viewWithConfig config labelFromNode edges nodeToRank =
   let
     outgoing = edges |> toAdjacencyList
     incoming = outgoing |> transpose
@@ -165,7 +128,7 @@ view config edges nodeToRank =
           []
           (ordered
             |> List.map
-                (rectFromNode >> viewRect)
+                (viewNode << labelFromNode <<* rectFromNode)
           )
       , g
           [ transform "translate(-0.5, -0.5)"
@@ -189,15 +152,34 @@ view config edges nodeToRank =
       ]
 
 
-viewRect : Rect -> Svg a
-viewRect r =
-  rect
-    [ x (r.x |> px)
-    , y (r.y |> px)
-    , width (r.width |> px)
-    , height (r.height |> px)
+-- <*>
+(<<*) : (x -> a -> b) -> (x -> a) -> x -> b
+(<<*) f g x =
+  f x (g x)
+
+infixl 8 <<*
+
+
+viewNode : String -> Rect -> Svg a
+viewNode label r =
+  g
+    [ transform <| "translate(" ++ toString r.x ++ ", " ++ toString r.y ++ ")"
     ]
-    []
+    [ rect
+        [ width (r.width |> px)
+        , height (r.height |> px)
+        ]
+        []
+    , text_
+        [ x (r.width + 4 |> px)
+        , y (r.height // 2 + 2 |> px)
+        , Svg.Attributes.fontFamily "Helvetica, Arial"
+        , Svg.Attributes.fontSize "12px"
+        , Svg.Attributes.dominantBaseline "middle"
+        ]
+        [ text label
+        ]
+    ]
 
 
 viewOrthoConnector : Int -> Coord -> Coord -> Svg a

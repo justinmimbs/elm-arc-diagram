@@ -191,8 +191,8 @@ filterPathsFromHelp pred ysByX prePath n =
 
 
 {-| Find the k-degenerate subgraph where k = 2 (i.e. the 2-core). Recursively
-remove edges containing nodes of 1 degree (i.e. all incoming and outgoing
-edges). An acyclic graph has no 2-core.
+remove edges connecting nodes of 1 degree (sinks and sources). An acyclic graph
+has no 2-core.
 -}
 degenerate : Set Edge -> Set Edge
 degenerate edges =
