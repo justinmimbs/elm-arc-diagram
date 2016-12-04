@@ -1,4 +1,4 @@
-module View exposing (view)
+module Diagram exposing (view)
 
 import Dict exposing (Dict)
 import Digraph exposing (Node, Edge, AdjacencyList, toAdjacencyList, transpose, degree, topologicalRank, topologicalSortBy)
@@ -121,16 +121,10 @@ viewWithConfig config labelFromNode edges nodeToRank =
 
   in
     svg
-      [ width "900px"
-      , height "600px"
+      [ width "1200px"
+      , height "1500px"
       ]
       [ g
-          []
-          (ordered
-            |> List.map
-                (viewNode << labelFromNode <<* rectFromNode)
-          )
-      , g
           [ transform "translate(-0.5, -0.5)"
           , strokeLinecap "square"
           ]
@@ -148,6 +142,12 @@ viewWithConfig config labelFromNode edges nodeToRank =
                       (nRect |> rectBottomRight |> addCoord (connectionShift nOut |> negate, 0)) -- outgoing connection: from bottom-right, stack left
                       (mRect |> rectBottomLeft |> addCoord (0, connectionShift mIn |> negate)) -- incoming connection: to bottom-left, stack up
                 )
+          )
+      , g
+          []
+          (ordered
+            |> List.map
+                (viewNode << labelFromNode <<* rectFromNode)
           )
       ]
 
