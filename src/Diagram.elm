@@ -38,12 +38,16 @@ layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing ordered 
       let
         indegree = degree incoming n
         outdegree = degree outgoing n
+        width = (outdegree * edgeSpacing + nodePadding * 2)
+        height = (indegree * edgeSpacing + nodePadding * 2)
+        -- center rect within yMinSpacing
+        yOffset = max 0 ((yMinSpacing - height) // 2)
         rect =
           Rect
             cursorX
-            cursorY
-            (outdegree * edgeSpacing + nodePadding * 2)
-            (indegree * edgeSpacing + nodePadding * 2)
+            (cursorY + yOffset)
+            width
+            height
       in
         ( (cursorX + rect.width, cursorY + (max yMinSpacing rect.height))
         , dict |> Dict.insert n rect
@@ -91,6 +95,24 @@ layoutEdges edges ordered =
     |> Tuple.first
 
 
+listTopNodes : Dict Node Int -> List Node -> List Node
+listTopNodes nodeToRank ordered =
+  List.foldl
+    (\n (ns, rank) ->
+      let
+        nRank = Dict.get n nodeToRank |> Maybe.withDefault 0
+      in
+        if nRank == rank then
+          (ns, rank)
+        else
+          (n :: ns, nRank)
+    )
+    ([], -1)
+    ordered
+  |> Tuple.first
+  |> List.reverse
+
+
 view : (Node -> String) -> Set Edge -> Dict Node Int -> Html a
 view =
   viewWithConfig defaultConfig
@@ -103,6 +125,7 @@ viewWithConfig config labelFromNode edges nodeToRank =
     incoming = outgoing |> transpose
     -- order same-rank nodes by: incoming degree, outgoing degree descending
     ordered = topologicalSortBy (\n -> (degree incoming n, degree outgoing n |> negate)) nodeToRank
+    topNodes = listTopNodes nodeToRank ordered
 
     -- layout dicts
     nodeToRect = layoutNodes config incoming outgoing ordered
@@ -148,6 +171,25 @@ viewWithConfig config labelFromNode edges nodeToRank =
           (ordered
             |> List.map
                 (viewNode << labelFromNode <<* rectFromNode)
+          )
+      , g
+          []
+          (topNodes
+            |> List.map
+                (\n ->
+                  let
+                    nRect = rectFromNode n
+                    yOffset = max 0 ((config.yMinSpacing - nRect.height) // 2)
+                  in
+                    Svg.rect
+                      [ fill "rgba(0, 0, 0, 0.2)"
+                      , x (nRect.x + nRect.width |> px)
+                      , y (nRect.y - yOffset |> px)
+                      , width (300 |> px)
+                      , height (1 |> px)
+                      ]
+                      []
+                )
           )
       ]
 
