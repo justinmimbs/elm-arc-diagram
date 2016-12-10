@@ -42,7 +42,7 @@ sourceNodes edges =
 {-| From a set of edges, get a dictionary of (node -> topological rank) if the
 edges are acyclic.
 -}
-topologicalRank : Set Edge -> Result String (Dict Node Int)
+topologicalRank : Set Edge -> Maybe (Dict Node Int)
 topologicalRank edges =
   let
     (remainingEdges, rankedNodes) =
@@ -53,9 +53,9 @@ topologicalRank edges =
         Dict.empty
   in
     if Set.isEmpty remainingEdges then
-      Ok rankedNodes
+      Just rankedNodes
     else
-      Err "Graph must be acyclic to be topologically ranked"
+      Nothing
 
 
 topologicalRankHelp : Int -> Set Node -> Set Edge -> Dict Node Int -> (Set Edge, Dict Node Int)
@@ -140,14 +140,14 @@ fromAdjacencyList =
 transpose : AdjacencyList -> AdjacencyList
 transpose =
   Dict.foldl
-    (\x ys xsByY ->
+    (\x ys adjListT ->
       Set.foldl
         (\y ->
           Dict.update
             y
             (Maybe.withDefault Set.empty >> Set.insert x >> Just)
         )
-        xsByY
+        adjListT
         ys
     )
     Dict.empty
@@ -164,13 +164,13 @@ pathsFrom =
 nodes to follow.
 -}
 filterPathsFrom : (Node -> Bool) -> Node -> AdjacencyList -> List Path
-filterPathsFrom pred n ysByX =
-  filterPathsFromHelp pred ysByX [] n
+filterPathsFrom pred n adjList =
+  filterPathsFromHelp pred adjList [] n
     |> List.map List.reverse
 
 
 filterPathsFromHelp : (Node -> Bool) -> AdjacencyList -> Path -> Node -> List Path
-filterPathsFromHelp pred ysByX prePath n =
+filterPathsFromHelp pred adjList prePath n =
   let
     path =
       n :: prePath
@@ -179,12 +179,12 @@ filterPathsFromHelp pred ysByX prePath n =
       -- path has a cycle; stop following
       [ path ]
     else
-      Dict.get n ysByX
+      Dict.get n adjList
         |> Maybe.map
             -- follow each node in set
             (Set.filter pred
               >> Set.toList
-              >> List.concatMap (filterPathsFromHelp pred ysByX path))
+              >> List.concatMap (filterPathsFromHelp pred adjList path))
         |> Maybe.withDefault
             -- path has reached terminal node
             [ path ]
@@ -254,16 +254,6 @@ isSimpleCycle path =
 degree : AdjacencyList -> Node -> Int
 degree adjList =
   (flip Dict.get) adjList >> Maybe.map Set.size >> Maybe.withDefault 0
-
-
-{-
--- TODO Does this belong here?
-degreePair : AdjacencyList -> AdjacencyList ->  Node -> (Int, Int)
-degreePair incoming outgoing n =
-  (,)
-    (degree incoming n)
-    (degree outgoing n)
--}
 
 
 -- List extra
