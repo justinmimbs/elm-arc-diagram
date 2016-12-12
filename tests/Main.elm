@@ -2,6 +2,7 @@ module Main exposing (..)
 
 import Dict exposing (Dict)
 import Digraph exposing (..)
+import Html
 import Set exposing (Set)
 
 
@@ -80,12 +81,13 @@ tests =
   ]
 
 
-results = List.map ((|>) ()) tests
+result =
+  tests
+    |> List.map ((|>) ())
+    |> List.all ((==) True)
+    |> (\pass -> if pass then "All tests passed" else "Failing tests")
+    |> Debug.log "result"
 
 
-_ = Debug.log "results"
-      ( if results |> List.all ((==) True) then
-          "All tests passed"
-        else
-          "Failing tests"
-      )
+main =
+  Html.div [] [ Html.text result ]
