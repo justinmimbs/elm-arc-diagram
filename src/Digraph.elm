@@ -8,6 +8,7 @@ module Digraph exposing
   , pathsFrom
   , findCycles
   , degree
+  , distancesFrom
   )
 
 import Dict exposing (Dict)
@@ -254,6 +255,46 @@ isSimpleCycle path =
 degree : AdjacencyList -> Node -> Int
 degree adjList =
   (flip Dict.get) adjList >> Maybe.map Set.size >> Maybe.withDefault 0
+
+
+-- TODO flip args, like `degree`, for convenience of typical use over convention? otherwise, flip `degree` for consistency
+successors : Node -> AdjacencyList -> Set Node
+successors n =
+  Dict.get n >> Maybe.withDefault Set.empty
+
+
+distancesFrom : Node -> AdjacencyList -> Dict Node Int
+distancesFrom n =
+  distancesFromHelp
+    Dict.empty
+    0
+    (Set.singleton n)
+
+
+distancesFromHelp : Dict Node Int -> Int -> Set Node -> AdjacencyList -> Dict Node Int
+distancesFromHelp prevResult distance nodes adjList =
+  let
+    result =
+      Set.foldl
+        ((flip Dict.insert) distance)
+        prevResult
+        nodes
+
+    nextNodes =
+      nodes
+        |> Set.foldl
+            (\n ->
+              Set.union
+                (successors n adjList)
+            )
+            Set.empty
+        |> (flip Set.diff)
+            (Dict.keys result |> Set.fromList)
+  in
+    if Set.isEmpty nextNodes then
+      result
+    else
+      distancesFromHelp result (distance + 1) nextNodes adjList
 
 
 -- List extra

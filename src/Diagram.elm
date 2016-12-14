@@ -74,10 +74,10 @@ defaultViewLabel string =
     ]
 
 
---
+-- (flip (getWithDefault v)) dict)
 
-functionFromDict : v -> Dict comparable v -> comparable -> v
-functionFromDict default dict =
+lookup : v -> Dict comparable v -> comparable -> v
+lookup default dict =
   (flip Dict.get) dict >> Maybe.withDefault default
 
 
@@ -124,7 +124,7 @@ layoutEdges edges ordered =
         |> List.indexedMap
             (flip (,))
         |> Dict.fromList
-        |> functionFromDict -1
+        |> lookup -1
 
     orderedEdges : List Edge
     orderedEdges =
@@ -202,10 +202,10 @@ viewWithConfig layout drawing (edges, nodeToRank) =
 
     -- layout functions
     connectionOrdinalsFromEdge =
-      functionFromDict (0, 0) edgeToConnectionOrdinals
+      lookup (0, 0) edgeToConnectionOrdinals
 
     rectFromNode =
-      functionFromDict emptyRect nodeToRect
+      lookup emptyRect nodeToRect
 
     connectionShift : Int -> Int
     connectionShift ordinal =
@@ -218,7 +218,7 @@ viewWithConfig layout drawing (edges, nodeToRank) =
       , height (h |> px)
       ]
       [ g
-          [ transform "translate(-0.5, -0.5)"
+          [ transform "translate(-0.5, 0.5)"
           , strokeLinecap "square"
           ]
           (edges
