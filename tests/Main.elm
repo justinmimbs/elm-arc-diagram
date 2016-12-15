@@ -1,7 +1,8 @@
 module Main exposing (..)
 
+import AcyclicDigraph
 import Dict exposing (Dict)
-import Digraph exposing (..)
+import Digraph exposing (Node, Edge)
 import Html
 import Set exposing (Set)
 
@@ -62,21 +63,23 @@ tests : List (() -> Bool)
 tests =
   [ \() ->
       edges1
-        |> topologicalRank
-        |> (==) (Just <| Dict.fromList [ (2, 4), (3, 1), (4, 2), (5, 1), (7, 1), (8, 2), (9, 3), (10, 3), (11, 2) ])
+        |> AcyclicDigraph.fromEdges
+        |> Result.map AcyclicDigraph.topologicalRank
+        |> (==) (Ok <| Dict.fromList [ (2, 4), (3, 1), (4, 2), (5, 1), (7, 1), (8, 2), (9, 3), (10, 3), (11, 2) ])
   , \() ->
       edges1
         |> Set.insert (9, 5) -- make cycle
-        |> topologicalRank
-        |> (==) Nothing
+        |> AcyclicDigraph.fromEdges
+        |> Result.map AcyclicDigraph.topologicalRank
+        |> (==) (Err [ [ 5, 11, 9, 5 ] ])
   , \() ->
       edges2
-        |> toAdjacencyList
-        |> pathsFrom 1
+        |> Digraph.toAdjacencyList
+        |> Digraph.pathsFrom 1
         |> (==) [ [ 1, 2, 4, 1 ], [ 1, 2, 6, 7 ], [ 1, 2, 6, 8 ], [ 1, 3, 5 ] ]
   , \() ->
       edges3
-        |> findCycles
+        |> Digraph.findCycles
         |> (==) [ [ 2, 3, 8, 9, 2 ], [ 2, 3, 8, 9, 5, 11, 2 ], [ 2, 3, 9, 2 ], [ 2, 3, 9, 5, 11, 2 ], [ 5, 11, 9, 5 ] ]
   ]
 

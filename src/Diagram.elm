@@ -1,81 +1,57 @@
 module Diagram exposing
-  ( GraphData, graphDataFromEdges
-  , LayoutConfig, defaultLayoutConfig
-  , DrawingConfig, defaultDrawingConfig
-  , view, viewWithConfig
+  ( view
+  , viewWithOptions, Options, defaultOptions
   )
 
+import AcyclicDigraph exposing (AcyclicDigraph)
 import Dict exposing (Dict)
-import Digraph exposing (Node, Edge, AdjacencyList, toAdjacencyList, transpose, degree, topologicalRank, topologicalSortBy)
+import Digraph exposing (Node, Edge, AdjacencyList, toAdjacencyList, transpose, degree)
 import Html exposing (Html)
 import Html.Attributes
 import Set exposing (Set)
-import Svg exposing (Svg, svg, g, path, rect, text_, text)
+import Svg exposing (Svg)
 import Svg.Attributes exposing (x, y, width, height, transform, strokeLinecap, d, stroke, fill)
 import Svg.Events exposing (onClick)
 
 
--- "graph" here specifically means "acyclic digraph"
-
-type alias GraphData =
-  (Set Edge, Dict Node Int)
-
-
-graphDataFromEdges : Set Edge -> Maybe GraphData
-graphDataFromEdges edges =
-  edges
-    |> topologicalRank
-    |> Maybe.map ((,) edges)
-
-
-type alias LayoutConfig =
+type alias Options =
   { edgeSpacing : Int
   , nodePadding : Int
   , yMinSpacing : Int
   , edgeRadius : Int
   , labelMaxWidth : Int
+  , colorNode : Node -> String
+  , colorEdge : Edge -> String
+  , viewLabel : Node -> Svg Node
   }
 
 
-defaultLayoutConfig : LayoutConfig
-defaultLayoutConfig =
+defaultOptions : Options
+defaultOptions =
   { edgeSpacing = 2
   , nodePadding = 4
   , yMinSpacing = 20
   , edgeRadius = 4
   , labelMaxWidth = 300
-  }
-
-
-type alias DrawingConfig =
-  { colorNode : (Node -> String)
-  , colorEdge : (Edge -> String)
-  , viewLabel : (Node -> Svg Node)
-  }
-
-
-defaultDrawingConfig : DrawingConfig
-defaultDrawingConfig =
-  { colorNode = always "black"
+  , colorNode = always "black"
   , colorEdge = always "gray"
-  , viewLabel = toString >> defaultViewLabel
+  , viewLabel = toString >> viewLabel
   }
 
 
-defaultViewLabel : String -> Svg a
-defaultViewLabel string =
-  text_
-    [ x (4 |> px)
+viewLabel : String -> Svg a
+viewLabel string =
+  Svg.text_
+    [ x "4px"
     , Svg.Attributes.fontFamily "Helvetica, Arial"
-    , Svg.Attributes.fontSize (12 |> px)
+    , Svg.Attributes.fontSize "12px"
     , Svg.Attributes.dominantBaseline "middle"
     ]
-    [ text string
+    [ Svg.text string
     ]
 
 
--- (flip (getWithDefault v)) dict)
-
+-- lookup: flip (Dict.getWithDefault v))
 lookup : v -> Dict comparable v -> comparable -> v
 lookup default dict =
   (flip Dict.get) dict >> Maybe.withDefault default
@@ -86,7 +62,7 @@ centeringOffset outer inner =
   max 0 ((outer - inner) // 2)
 
 
-layoutNodes : LayoutConfig -> AdjacencyList -> AdjacencyList -> List Node -> Dict Node Rect
+layoutNodes : Options -> AdjacencyList -> AdjacencyList -> List Node -> Dict Node Rect
 layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing ordered =
   List.foldl
     (\n ((cursorX, cursorY), dict) ->
@@ -151,11 +127,11 @@ layoutEdges edges ordered =
 
 
 listTopNodes : Dict Node Int -> List Node -> List Node
-listTopNodes nodeToRank ordered =
+listTopNodes rankedNodes ordered =
   List.foldl
     (\n (ns, rank) ->
       let
-        nRank = Dict.get n nodeToRank |> Maybe.withDefault 0
+        nRank = Dict.get n rankedNodes |> Maybe.withDefault 0
       in
         if nRank == rank then
           (ns, rank)
@@ -168,56 +144,60 @@ listTopNodes nodeToRank ordered =
   |> List.reverse
 
 
-calculateSize : LayoutConfig -> List Node -> (Node -> Rect) -> Coord
-calculateSize layout ordered rectFromNode =
+calculateSize : Options -> List Node -> (Node -> Rect) -> Coord
+calculateSize { yMinSpacing, labelMaxWidth } ordered rectFromNode =
   let
     lastRect = ordered |> List.reverse |> List.head |> Maybe.map rectFromNode |> Maybe.withDefault emptyRect
   in
     addCoord
       (rectTopRight lastRect)
-      (layout.labelMaxWidth, max layout.yMinSpacing lastRect.height)
+      (labelMaxWidth, max yMinSpacing lastRect.height)
 
 
-view : (Node -> String) -> GraphData -> Html Node
-view nodeToString =
-  viewWithConfig
-    defaultLayoutConfig
-    { defaultDrawingConfig
-      | viewLabel = nodeToString >> defaultViewLabel
+view : (Node -> String) -> AcyclicDigraph -> Html Node
+view stringFromNode =
+  viewWithOptions
+    { defaultOptions
+      | viewLabel = viewLabel << stringFromNode
     }
 
 
-viewWithConfig : LayoutConfig -> DrawingConfig -> GraphData -> Html Node
-viewWithConfig layout drawing (edges, nodeToRank) =
+viewWithOptions : Options -> AcyclicDigraph -> Html Node
+viewWithOptions options graph =
   let
+    edges = AcyclicDigraph.toEdges graph
+    rankedNodes = AcyclicDigraph.topologicalRank graph
+
     outgoing = edges |> toAdjacencyList
     incoming = outgoing |> transpose
-    -- order same-rank nodes by: incoming degree, outgoing degree descending
-    ordered = topologicalSortBy (\n -> (degree incoming n, degree outgoing n |> negate)) nodeToRank
-    topNodes = listTopNodes nodeToRank ordered
+
+    -- order same-rank nodes by: incoming degree (ascending), outgoing degree (descending)
+    ordered =
+      AcyclicDigraph.topologicalSortBy
+        (\n -> (degree incoming n, degree outgoing n |> negate))
+        rankedNodes
+    topNodes = listTopNodes rankedNodes ordered
 
     -- layout dicts
-    nodeToRect = layoutNodes layout incoming outgoing ordered
+    nodeToRect = layoutNodes options incoming outgoing ordered
+    -- TODO order edges here, then use it in the view to render edges in order
     edgeToConnectionOrdinals = layoutEdges edges ordered
 
     -- layout functions
-    connectionOrdinalsFromEdge =
-      lookup (0, 0) edgeToConnectionOrdinals
-
-    rectFromNode =
-      lookup emptyRect nodeToRect
+    connectionOrdinalsFromEdge = lookup (0, 0) edgeToConnectionOrdinals
+    rectFromNode = lookup emptyRect nodeToRect
 
     connectionShift : Int -> Int
     connectionShift ordinal =
-      ordinal * layout.edgeSpacing + layout.nodePadding
+      ordinal * options.edgeSpacing + options.nodePadding
 
-    (w, h) = calculateSize layout ordered rectFromNode
+    (w, h) = calculateSize options ordered rectFromNode
   in
-    svg
+    Svg.svg
       [ width (w |> px)
       , height (h |> px)
       ]
-      [ g
+      [ Svg.g
           [ transform "translate(-0.5, 0.5)"
           , strokeLinecap "square"
           ]
@@ -231,33 +211,33 @@ viewWithConfig layout drawing (edges, nodeToRank) =
                     mRect = rectFromNode m
                   in
                     viewOrthoConnector
-                      (drawing.colorEdge (n, m))
-                      layout.edgeRadius
+                      (options.colorEdge (n, m))
+                      options.edgeRadius
                       (nRect |> rectBottomRight |> addCoord (connectionShift nOut |> negate, 0)) -- outgoing connection: from bottom-right, stack left
                       (mRect |> rectBottomLeft |> addCoord (0, connectionShift mIn |> negate)) -- incoming connection: to bottom-left, stack up
                 )
           )
-      , g
+      , Svg.g
           [ Svg.Attributes.style "cursor: default;"
           ]
           (ordered
             |> List.map
-                (viewNode layout drawing rectFromNode)
+                (viewNode options rectFromNode)
           )
-      , g
+      , Svg.g
           []
           (topNodes
             |> List.map
                 (\n ->
                   let
                     nRect = rectFromNode n
-                    yOffset = centeringOffset layout.yMinSpacing nRect.height
+                    yOffset = centeringOffset options.yMinSpacing nRect.height
                   in
                     Svg.rect
                       [ fill "rgba(0, 0, 0, 0.2)"
                       , x (nRect.x + nRect.width |> px)
                       , y (nRect.y - yOffset |> px)
-                      , width (layout.labelMaxWidth |> px)
+                      , width (options.labelMaxWidth |> px)
                       , height (1 |> px)
                       ]
                       []
@@ -266,29 +246,29 @@ viewWithConfig layout drawing (edges, nodeToRank) =
       ]
 
 
-viewNode : LayoutConfig -> DrawingConfig -> (Node -> Rect) -> Node -> Svg Node
-viewNode layout drawing toRect n =
+viewNode : Options -> (Node -> Rect) -> Node -> Svg Node
+viewNode options toRect n =
   let
     nRect = n |> toRect
-    yOffset = centeringOffset layout.yMinSpacing nRect.height
+    yOffset = centeringOffset options.yMinSpacing nRect.height
   in
-    g
+    Svg.g
       [ transform <| translate nRect.x nRect.y
       ]
-      [ rect
+      [ Svg.rect
           [ width (nRect.width |> px)
           , height (nRect.height |> px)
-          , fill (drawing.colorNode n)
+          , fill (options.colorNode n)
           ]
           []
-      , g
+      , Svg.g
           [ transform <| translate nRect.width (nRect.height // 2 + 2) ]
-          [ n |> drawing.viewLabel
+          [ n |> options.viewLabel
           ]
-      , rect
+      , Svg.rect
           [ y (negate yOffset |> px)
-          , width (nRect.width + layout.labelMaxWidth |> px)
-          , height (max layout.yMinSpacing nRect.height |> px)
+          , width (nRect.width + options.labelMaxWidth |> px)
+          , height (max options.yMinSpacing nRect.height |> px)
           , fill "transparent"
           , onClick n
           ]
@@ -298,7 +278,7 @@ viewNode layout drawing toRect n =
 
 viewOrthoConnector : String -> Int -> Coord -> Coord -> Svg a
 viewOrthoConnector color radius from to =
-  path
+  Svg.path
     [ stroke color
     , fill "transparent"
     , d (pathOrthoConnector radius from to)
@@ -332,7 +312,7 @@ translate x y =
   "translate(" ++ toString x ++ ", " ++ toString y ++ ")"
 
 
---
+-- Coord, Rect
 
 type alias Coord =
   (Int, Int)
@@ -379,7 +359,7 @@ rectBottomRight { x, y, width, height } =
   )
 
 
--- construct path descriptions
+-- Construct Svg.path descriptions.
 
 join : List String -> String
 join =

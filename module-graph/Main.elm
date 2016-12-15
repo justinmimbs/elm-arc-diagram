@@ -1,8 +1,10 @@
-module Explorer exposing (..)
+module Main exposing (..)
 
-import Diagram exposing (defaultLayoutConfig, defaultDrawingConfig)
+import AcyclicDigraph exposing (AcyclicDigraph)
+import Diagram
+import DiagramConnectivity
 import Dict exposing (Dict)
-import Digraph exposing (..)
+import Digraph exposing (Node, Edge)
 import Html exposing (Html)
 import Html.Attributes
 import Set exposing (Set)
@@ -10,6 +12,12 @@ import Svg exposing (Svg)
 import Svg.Attributes
 
 import Json.Decode exposing (Decoder)
+
+
+type alias Model =
+  { moduleGraph : ModuleGraph
+  , selectedNode : Maybe Node
+  }
 
 
 input : String
@@ -67,18 +75,21 @@ toggleMaybe a ma =
   else
     Just a
 
-{-
-toNodes : Dict comparable (Set comparable) -> Set comparable
-toNodes =
-  Dict.foldl
-    (\x ys nodes ->
-      Set.foldl
-        Set.insert
-        nodes
-        (Set.insert x ys)
-    )
-    Set.empty
--}
+
+isNothing : Maybe a -> Bool
+isNothing m =
+  case m of
+    Just _  -> False
+    Nothing -> True
+
+
+unpack : (e -> x) -> (a -> x) -> Result e a -> x
+unpack fromErr fromOk result =
+  case result of
+    Err e ->
+      fromErr e
+    Ok a ->
+      fromOk a
 
 
 toEdges : Dict comparable (Set comparable) -> Set (comparable, comparable)
@@ -91,18 +102,11 @@ toEdges =
     Set.empty
 
 
-{-| Given a Dict x y, create a Dict y x. Assume the Dict represents a
-bijective mapping.
--}
-{-
-invertDict : Dict comparable comparable1 -> Dict comparable1 comparable
-invertDict =
-  Dict.foldl
-    (flip Dict.insert)
-    Dict.empty
--}
-
 -- view
+
+defaultOptions = Diagram.defaultOptions
+defaultOptionsConnectivity = DiagramConnectivity.defaultOptions
+
 
 view : (ModuleGraph, Maybe Node) -> Html Node
 view (modules, mSelectedNode) =
@@ -113,100 +117,39 @@ view (modules, mSelectedNode) =
         |> Dict.map (\_ v -> v.imports)
         |> toEdges
         |> Set.map (\(x, y) -> (y, x))
-
-    viewLabelFromId : (Node -> Bool) -> Node -> Svg Node
-    viewLabelFromId isDimmed =
-      (flip Dict.get) modules >> Maybe.map (\m -> viewLabel m.name m.package (isDimmed m.id)) >> Maybe.withDefault (Svg.text "")
-
-    drawingConfig =
-      case mSelectedNode of
-        Just node ->
-          let
-            outgoing = edges |> Digraph.toAdjacencyList
-            incoming = Digraph.transpose outgoing
-            distancesFromSelected = outgoing |> Digraph.distancesFrom node
-            distancesToSelected = incoming |> Digraph.distancesFrom node
-            isDimmed = (\n -> not <| Dict.member n distancesFromSelected || Dict.member n distancesToSelected)
-          in
-            { defaultDrawingConfig
-              | viewLabel = viewLabelFromId isDimmed
-              , colorNode = colorFromNode distancesFromSelected distancesToSelected
-              , colorEdge = colorFromEdge distancesFromSelected distancesToSelected
-            }
-
-        Nothing ->
-            { defaultDrawingConfig
-              | viewLabel = viewLabelFromId (always False)
-            }
-
   in
     Html.div
       [ Html.Attributes.style [ ("margin", "40px") ]
       ]
-      [ edges
-          |> Diagram.graphDataFromEdges
-          |> Maybe.map
-              (Diagram.viewWithConfig defaultLayoutConfig drawingConfig)
-          |> Maybe.withDefault
-              (Html.text "Graph contains cycles")
+      [ AcyclicDigraph.fromEdges edges
+          |> unpack
+              (always <| Html.text "Graph contains cycles")
+              (viewDiagram modules mSelectedNode)
       ]
 
 
-colorFromEdge : Dict Node Int -> Dict Node Int -> Edge -> String
-colorFromEdge distancesFrom distancesTo (a, b) =
-  orElse
-    (Maybe.map2
-      (\distanceFromA _ -> colorFromDistance (rgba 35 135 206) distanceFromA)
-      (Dict.get a distancesFrom)
-      (Dict.get b distancesFrom)
-    )
-    (Maybe.map2
-      (\_ distanceToB -> colorFromDistance (rgba 224 69 39) distanceToB)
-      (Dict.get a distancesTo)
-      (Dict.get b distancesTo)
-    )
-  |> Maybe.withDefault "rgba(0, 0, 0, 0.2)"
+viewDiagram : ModuleGraph -> Maybe Node -> AcyclicDigraph -> Html Node
+viewDiagram modules mSelectedNode graph =
+  let
+    modulePackageFromNode : Node -> (String, String)
+    modulePackageFromNode =
+      (flip Dict.get) modules >> Maybe.map (\m -> (m.name, m.package)) >> Maybe.withDefault ("<module name>", "<package name>")
+  in
+    case mSelectedNode of
+      Just node ->
+        DiagramConnectivity.viewWithOptions
+          { defaultOptionsConnectivity | viewLabel = \d n -> viewLabel (isNothing d) (modulePackageFromNode n) }
+          node
+          graph
+
+      Nothing ->
+        Diagram.viewWithOptions
+          { defaultOptions | viewLabel = viewLabel False << modulePackageFromNode }
+          graph
 
 
-colorFromNode : Dict Node Int -> Dict Node Int -> Node -> String
-colorFromNode distancesFrom distancesTo n =
-  orElse
-    (Dict.get n distancesFrom |> Maybe.map (colorFromDistance (rgba 35 135 206)))
-    (Dict.get n distancesTo |> Maybe.map (colorFromDistance (rgba 224 69 39)))
-  |> Maybe.withDefault "rgba(0, 0, 0, 0.2)"
-
-
-colorFromDistance : (Float -> String) -> Int -> String
-colorFromDistance colorFromAlpha distance =
-  if distance == 0 then
-    "black"
-  else
-    colorFromAlpha <| 1 - ((min 3 (toFloat distance) - 1) * 0.3)
-
-
-rgba : Int -> Int -> Int -> Float -> String
-rgba r g b a =
-  "rgba("
-  ++ (List.map toString [ r, g, b ] ++ [ toString a ] |> String.join ", ")
-  ++ ")"
-
-
-isJust : Maybe a -> Bool
-isJust m =
-  case m of
-    Just _  -> True
-    Nothing -> False
-
-
-orElse : Maybe a -> Maybe a -> Maybe a
-orElse alt x =
-  case x of
-    Just _  -> x
-    Nothing -> alt
-
-
-viewLabel : String -> String -> Bool -> Svg a
-viewLabel moduleName packageName isDimmed =
+viewLabel : Bool -> (String, String) -> Svg a
+viewLabel isDimmed (moduleName, packageName) =
   Svg.text_
     [ Svg.Attributes.x "4px"
     , Svg.Attributes.fontFamily "Helvetica, Arial"
