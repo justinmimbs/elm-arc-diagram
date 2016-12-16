@@ -1,5 +1,5 @@
 module AcyclicDigraph exposing
-  ( AcyclicDigraph, Cycle
+  ( Node, Edge, Cycle, AcyclicDigraph
   , fromEdges
   , toEdges
   , topologicalRank
@@ -7,16 +7,24 @@ module AcyclicDigraph exposing
   )
 
 import Dict exposing (Dict)
-import Digraph exposing (Node, Edge, Path, AdjacencyList)
+import Digraph
 import Set exposing (Set)
 
 
-type AcyclicDigraph =
-  AcyclicDigraph (Set Edge)
+type alias Node =
+  Digraph.Node
+
+
+type alias Edge =
+  Digraph.Edge
 
 
 type alias Cycle =
   List Node
+
+
+type AcyclicDigraph =
+  AcyclicDigraph (Set Edge)
 
 
 fromEdges : Set Edge -> Result (List Cycle) AcyclicDigraph
@@ -58,7 +66,7 @@ topologicalRank (AcyclicDigraph edges) =
     if Set.isEmpty remainingEdges then
       rankedNodes
     else
-      -- graph has cycles; remove this branch?
+      -- graph has cycles; remove this branch and always return rankedNodes?
       Dict.empty
 
 
