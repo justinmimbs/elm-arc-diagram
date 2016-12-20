@@ -1,6 +1,7 @@
 module Diagram exposing
   ( view
-  , viewWithOptions, Options, defaultOptions
+  , Layout, defaultLayout
+  , Paint, basicPaint
   )
 
 import AcyclicDigraph exposing (AcyclicDigraph)
@@ -14,36 +15,50 @@ import Svg.Attributes exposing (x, y, width, height, transform, strokeLinecap, d
 import Svg.Events exposing (onClick)
 
 
-type alias Options =
+type alias Layout =
   { edgeSpacing : Int
   , nodePadding : Int
   , yMinSpacing : Int
   , edgeRadius : Int
   , labelMaxWidth : Int
-  , colorNode : Node -> String
-  , colorEdge : Edge -> String
-  , viewLabel : Node -> Svg Node
   }
 
 
-defaultOptions : Options
-defaultOptions =
+defaultLayout : Layout
+defaultLayout =
   { edgeSpacing = 2
   , nodePadding = 4
   , yMinSpacing = 20
   , edgeRadius = 4
   , labelMaxWidth = 300
-  , colorNode = always "black"
-  , colorEdge = always "gray"
-  , viewLabel = toString >> viewLabel
   }
+
+
+type alias Paint =
+  { viewLabel : Node -> Svg Node
+  , colorNode : Node -> String
+  , colorEdge : Edge -> String
+  }
+
+
+defaultPaint : Paint
+defaultPaint =
+  { viewLabel = toString >> viewLabel
+  , colorNode = always "black"
+  , colorEdge = always "rgba(0, 0, 0, 0.4)"
+  }
+
+
+basicPaint : (Node -> String) -> Paint
+basicPaint toLabel =
+  { defaultPaint | viewLabel = toLabel >> viewLabel }
 
 
 viewLabel : String -> Svg a
 viewLabel string =
   Svg.text_
-    [ x "4px"
-    , Svg.Attributes.fontFamily "Helvetica, Arial"
+    [ Svg.Attributes.x "4px"
+    , Svg.Attributes.fontFamily "Helvetica, Arial, san-serif"
     , Svg.Attributes.fontSize "12px"
     , Svg.Attributes.dominantBaseline "middle"
     ]
@@ -62,7 +77,7 @@ centeringOffset outer inner =
   max 0 ((outer - inner) // 2)
 
 
-layoutNodes : Options -> AdjacencyList -> AdjacencyList -> List Node -> Dict Node Rect
+layoutNodes : Layout -> AdjacencyList -> AdjacencyList -> List Node -> Dict Node Rect
 layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing ordered =
   List.foldl
     (\n ((cursorX, cursorY), dict) ->
@@ -144,7 +159,7 @@ listTopNodes rankedNodes ordered =
   |> List.reverse
 
 
-calculateSize : Options -> List Node -> (Node -> Rect) -> Coord
+calculateSize : Layout -> List Node -> (Node -> Rect) -> Coord
 calculateSize { yMinSpacing, labelMaxWidth } ordered rectFromNode =
   let
     lastRect = ordered |> List.reverse |> List.head |> Maybe.map rectFromNode |> Maybe.withDefault emptyRect
@@ -154,16 +169,8 @@ calculateSize { yMinSpacing, labelMaxWidth } ordered rectFromNode =
       (labelMaxWidth, max yMinSpacing lastRect.height)
 
 
-view : (Node -> String) -> AcyclicDigraph -> Html Node
-view stringFromNode =
-  viewWithOptions
-    { defaultOptions
-      | viewLabel = viewLabel << stringFromNode
-    }
-
-
-viewWithOptions : Options -> AcyclicDigraph -> Html Node
-viewWithOptions options graph =
+view : Layout -> Paint -> AcyclicDigraph -> Html Node
+view layout paint graph =
   let
     edges = AcyclicDigraph.toEdges graph
     rankedNodes = AcyclicDigraph.topologicalRank graph
@@ -179,7 +186,7 @@ viewWithOptions options graph =
     topNodes = listTopNodes rankedNodes ordered
 
     -- layout dicts
-    nodeToRect = layoutNodes options incoming outgoing ordered
+    nodeToRect = layoutNodes layout incoming outgoing ordered
     -- TODO order edges here, then use it in the view to render edges in order
     edgeToConnectionOrdinals = layoutEdges edges ordered
 
@@ -189,9 +196,9 @@ viewWithOptions options graph =
 
     connectionShift : Int -> Int
     connectionShift ordinal =
-      ordinal * options.edgeSpacing + options.nodePadding
+      ordinal * layout.edgeSpacing + layout.nodePadding
 
-    (w, h) = calculateSize options ordered rectFromNode
+    (w, h) = calculateSize layout ordered rectFromNode
   in
     Svg.svg
       [ width (w |> px)
@@ -211,8 +218,8 @@ viewWithOptions options graph =
                     mRect = rectFromNode m
                   in
                     viewOrthoConnector
-                      (options.colorEdge (n, m))
-                      options.edgeRadius
+                      (paint.colorEdge (n, m))
+                      layout.edgeRadius
                       (nRect |> rectBottomRight |> addCoord (connectionShift nOut |> negate, 0)) -- outgoing connection: from bottom-right, stack left
                       (mRect |> rectBottomLeft |> addCoord (0, connectionShift mIn |> negate)) -- incoming connection: to bottom-left, stack up
                 )
@@ -222,7 +229,7 @@ viewWithOptions options graph =
           ]
           (ordered
             |> List.map
-                (viewNode options rectFromNode)
+                (viewNode layout paint rectFromNode)
           )
       , Svg.g
           []
@@ -231,13 +238,13 @@ viewWithOptions options graph =
                 (\n ->
                   let
                     nRect = rectFromNode n
-                    yOffset = centeringOffset options.yMinSpacing nRect.height
+                    yOffset = centeringOffset layout.yMinSpacing nRect.height
                   in
                     Svg.rect
                       [ fill "rgba(0, 0, 0, 0.2)"
                       , x (nRect.x + nRect.width |> px)
                       , y (nRect.y - yOffset |> px)
-                      , width (options.labelMaxWidth |> px)
+                      , width (layout.labelMaxWidth |> px)
                       , height (1 |> px)
                       ]
                       []
@@ -246,11 +253,11 @@ viewWithOptions options graph =
       ]
 
 
-viewNode : Options -> (Node -> Rect) -> Node -> Svg Node
-viewNode options toRect n =
+viewNode : Layout -> Paint -> (Node -> Rect) -> Node -> Svg Node
+viewNode layout paint toRect n =
   let
     nRect = n |> toRect
-    yOffset = centeringOffset options.yMinSpacing nRect.height
+    yOffset = centeringOffset layout.yMinSpacing nRect.height
   in
     Svg.g
       [ transform <| translate nRect.x nRect.y
@@ -258,17 +265,17 @@ viewNode options toRect n =
       [ Svg.rect
           [ width (nRect.width |> px)
           , height (nRect.height |> px)
-          , fill (options.colorNode n)
+          , fill (paint.colorNode n)
           ]
           []
       , Svg.g
           [ transform <| translate nRect.width (nRect.height // 2 + 2) ]
-          [ n |> options.viewLabel
+          [ n |> paint.viewLabel
           ]
       , Svg.rect
           [ y (negate yOffset |> px)
-          , width (nRect.width + options.labelMaxWidth |> px)
-          , height (max options.yMinSpacing nRect.height |> px)
+          , width (nRect.width + layout.labelMaxWidth |> px)
+          , height (max layout.yMinSpacing nRect.height |> px)
           , fill "transparent"
           , onClick n
           ]

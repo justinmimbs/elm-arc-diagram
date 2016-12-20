@@ -1,6 +1,6 @@
 module DiagramConnectivity exposing
-  ( view
-  , viewWithOptions, Options, defaultOptions
+  ( paintConnectivity
+  , basicPaintConnectivity
   )
 
 import AcyclicDigraph exposing (AcyclicDigraph)
@@ -17,56 +17,7 @@ type alias Distance =
   Maybe Int
 
 
-type alias Options =
-  { edgeSpacing : Int
-  , nodePadding : Int
-  , yMinSpacing : Int
-  , edgeRadius : Int
-  , labelMaxWidth : Int
-  , colorNode : Distance -> Node -> String
-  , colorEdge : Distance -> Edge -> String
-  , viewLabel : Distance -> Node -> Svg Node
-  }
-
-
-diagramDefaultOptions = Diagram.defaultOptions
-
-defaultOptions : Options
-defaultOptions =
-  { edgeSpacing = diagramDefaultOptions.edgeSpacing
-  , nodePadding = diagramDefaultOptions.nodePadding
-  , yMinSpacing = diagramDefaultOptions.yMinSpacing
-  , edgeRadius = diagramDefaultOptions.edgeRadius
-  , labelMaxWidth = diagramDefaultOptions.labelMaxWidth
-  , colorNode = \d _ -> colorFromDistance d
-  , colorEdge = \d _ -> colorFromDistance d
-  , viewLabel = \d n -> viewLabel (isNothing d) (toString n)
-  }
-
-
-viewLabel : Bool -> String -> Svg a
-viewLabel isDimmed string =
-  Svg.text_
-    [ Svg.Attributes.x "4px"
-    , Svg.Attributes.fontFamily "Helvetica, Arial"
-    , Svg.Attributes.fontSize "12px"
-    , Svg.Attributes.dominantBaseline "middle"
-    , Svg.Attributes.fill (if isDimmed then "gray" else "black")
-    ]
-    [ Svg.text string
-    ]
-
-
-view : (Node -> String) -> Node -> AcyclicDigraph -> Html Node
-view stringFromNode =
-  viewWithOptions
-    { defaultOptions
-      | viewLabel = \d n -> viewLabel (isNothing d) (stringFromNode n)
-    }
-
-
-viewWithOptions : Options -> Node -> AcyclicDigraph -> Html Node
-viewWithOptions options node graph =
+paintConnectivity viewLabel colorNode colorEdge graph node =
   let
     outgoing = graph |> AcyclicDigraph.toEdges |> Digraph.toAdjacencyList
     incoming = Digraph.transpose outgoing
@@ -76,17 +27,31 @@ viewWithOptions options node graph =
         (outgoing |> Digraph.distancesFrom node)
         (incoming |> Digraph.distancesFrom node |> Dict.map (always negate))
   in
-    Diagram.viewWithOptions
-      { edgeSpacing = options.edgeSpacing
-      , nodePadding = options.nodePadding
-      , yMinSpacing = options.yMinSpacing
-      , edgeRadius = options.edgeRadius
-      , labelMaxWidth = options.labelMaxWidth
-      , colorNode = \node -> options.colorNode (Dict.get node distancesFrom) node
-      , colorEdge = \edge -> options.colorEdge (distanceForEdge distancesFrom edge) edge
-      , viewLabel = \node -> options.viewLabel (Dict.get node distancesFrom) node
+      { viewLabel = \node -> viewLabel node (Dict.get node distancesFrom)
+      , colorNode = \node -> colorNode node (Dict.get node distancesFrom)
+      , colorEdge = \edge -> colorEdge edge (distanceForEdge distancesFrom edge)
       }
-      graph
+
+
+--basicPaintConnectivity : (Node -> String) -> AcyclicDigraph -> Node -> Paint
+basicPaintConnectivity toLabel =
+  paintConnectivity
+    (\n d -> viewLabelDimmed (isNothing d) (toLabel n))
+    (always colorFromDistance)
+    (always colorFromDistance)
+
+
+viewLabelDimmed : Bool -> String -> Svg a
+viewLabelDimmed isDimmed string =
+  Svg.text_
+    [ Svg.Attributes.x "4px"
+    , Svg.Attributes.fontFamily "Helvetica, Arial"
+    , Svg.Attributes.fontSize "12px"
+    , Svg.Attributes.dominantBaseline "middle"
+    , Svg.Attributes.fill (labelColor isDimmed)
+    ]
+    [ Svg.text string
+    ]
 
 
 distanceForEdge : Dict Node Int -> Edge -> Distance
@@ -103,6 +68,14 @@ distanceForEdge distancesFrom (a, b) =
     (Dict.get a distancesFrom)
     (Dict.get b distancesFrom)
   |> Maybe.withDefault Nothing
+
+
+labelColor : Bool -> String
+labelColor isDimmed =
+  if isDimmed then
+    "rgb(200, 200, 200)"
+  else
+    "black"
 
 
 colorFromDistance : Distance -> String

@@ -1,5 +1,6 @@
 import AcyclicDigraph exposing (Node, Edge, Cycle, AcyclicDigraph)
 import Diagram
+import DiagramConnectivity as Diagram
 import Set exposing (Set)
 import Dict exposing (Dict)
 import Html exposing (Html)
@@ -8,18 +9,37 @@ import Html exposing (Html)
 main : Program Never Model Node
 main =
   Html.beginnerProgram
-    { model =  (exampleEdges, exampleLabels)
-    , update = always identity
+    { model =  Model exampleEdges exampleLabels Nothing
+    , update = update
     , view = view
     }
 
 
 type alias Model =
-  (Set Edge, Dict Node String)
+  { edges : Set Edge
+  , labels : Dict Node String
+  , selectedNode : Maybe Node
+  }
+
+
+update : Node -> Model -> Model
+update node model =
+  { model | selectedNode = model.selectedNode |> toggleMaybe node }
+
+
+defaultLayout =  Diagram.defaultLayout
+
+
+layout : Diagram.Layout
+layout =
+  { defaultLayout
+    | edgeRadius = 200
+    , labelMaxWidth = 60
+  }
 
 
 view : Model -> Html Node
-view (edges, labels) =
+view { edges, labels, selectedNode } =
   let
     toLabel = (flip Dict.get) labels >> Maybe.withDefault ""
   in
@@ -34,10 +54,18 @@ view (edges, labels) =
           ]
 
       Ok graph ->
-        Diagram.view
-          Diagram.defaultLayout
-          (Diagram.basicPaint toLabel)
-          graph
+        let
+          paint =
+            selectedNode
+              |> Maybe.map
+                  (Diagram.basicPaintConnectivity toLabel graph)
+              |> Maybe.withDefault
+                  (Diagram.basicPaint toLabel)
+        in
+          Diagram.view
+            layout
+            paint
+            graph
 
 
 viewCycle : (Node -> String) -> Cycle -> Html a
@@ -45,6 +73,14 @@ viewCycle toLabel cycle =
   Html.li
     []
     [ Html.text (cycle |> List.map toLabel |> String.join " -> ") ]
+
+
+toggleMaybe : a -> Maybe a -> Maybe a
+toggleMaybe a ma =
+  if ma == Just a then
+    Nothing
+  else
+    Just a
 
 
 --
