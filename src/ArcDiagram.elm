@@ -1,18 +1,18 @@
-module Diagram exposing
+module ArcDiagram exposing
   ( view
   , Layout, defaultLayout
-  , Paint, basicPaint
+  , Paint, basicPaint, defaultPaint
   )
 
-import AcyclicDigraph exposing (AcyclicDigraph)
+import AcyclicDigraph exposing (Node, Edge, AcyclicDigraph)
 import Dict exposing (Dict)
-import Digraph exposing (Node, Edge, AdjacencyList, toAdjacencyList, transpose, degree)
+import Digraph exposing (AdjacencyList)
 import Html exposing (Html)
 import Html.Attributes
 import Set exposing (Set)
 import Svg exposing (Svg)
-import Svg.Attributes exposing (x, y, width, height, transform, strokeLinecap, d, stroke, fill)
-import Svg.Events exposing (onClick)
+import Svg.Attributes
+import Svg.Events
 
 
 type alias Layout =
@@ -30,7 +30,7 @@ defaultLayout =
   , nodePadding = 4
   , yMinSpacing = 20
   , edgeRadius = 4
-  , labelMaxWidth = 300
+  , labelMaxWidth = 100
   }
 
 
@@ -78,16 +78,15 @@ centeringOffset outer inner =
 
 
 layoutNodes : Layout -> AdjacencyList -> AdjacencyList -> List Node -> Dict Node Rect
-layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing ordered =
+layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing orderedNodes =
   List.foldl
     (\n ((cursorX, cursorY), dict) ->
       let
-        indegree = degree incoming n
-        outdegree = degree outgoing n
+        indegree = incoming |> Digraph.degree n
+        outdegree = outgoing |> Digraph.degree n
         width = (outdegree * edgeSpacing + nodePadding * 2)
         height = (indegree * edgeSpacing + nodePadding * 2)
-        -- center rect within yMinSpacing
-        yOffset = centeringOffset yMinSpacing height
+        yOffset = centeringOffset yMinSpacing height -- center rect within yMinSpacing
         rect =
           Rect
             cursorX
@@ -102,47 +101,68 @@ layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing ordered 
     ( (0, 0)
     , Dict.empty
     )
-    ordered
+    orderedNodes
   |> Tuple.second
 
 
-layoutEdges : Set Edge -> List Node -> Dict Edge (Int, Int)
-layoutEdges edges ordered =
+layoutEdges : Layout -> (Node -> Rect) -> List Edge -> Dict Edge (Coord, Coord)
+layoutEdges layout toRect orderedEdges =
+  let
+    -- connection ordinal -> pixels
+    connectionShift : Int -> Int
+    connectionShift ordinal =
+      ordinal * layout.edgeSpacing + layout.nodePadding
+
+    edgeToConnectionOrdinals : Dict Edge (Int, Int)
+    edgeToConnectionOrdinals =
+      orderedEdges
+        |> List.foldl
+          (\(a, b) (dict, (outgoing, incoming)) ->
+            let
+              aOutOrdinal = Dict.get a outgoing |> Maybe.withDefault 0
+              bInOrdinal = Dict.get b incoming |> Maybe.withDefault 0
+            in
+              ( dict |> Dict.insert (a, b) (aOutOrdinal, bInOrdinal)
+              , ( outgoing |> Dict.insert a (aOutOrdinal + 1)
+                , incoming |> Dict.insert b (bInOrdinal + 1)
+                )
+              )
+          )
+          (Dict.empty, (Dict.empty, Dict.empty))
+        |> Tuple.first
+
+  in
+    edgeToConnectionOrdinals
+      |> Dict.map
+          (\(a, b) (aOut, bIn) ->
+            ( a |> toRect |> rectBottomRight |> addCoord (connectionShift aOut |> negate, 0) -- outgoing connection: from bottom-right, stack left
+            , b |> toRect |> rectBottomLeft |> addCoord (0, connectionShift bIn |> negate) -- incoming connection: to bottom-left, stack up
+            )
+          )
+
+
+{-| Sort a set of edges based on the provided ordering of nodes.
+-}
+sortEdges : List Node -> Set Edge -> List Edge
+sortEdges orderedNodes edges =
   let
     ordinalFromNode : Node -> Int
     ordinalFromNode =
-      ordered
+      orderedNodes
         |> List.indexedMap
             (flip (,))
         |> Dict.fromList
         |> lookup -1
-
-    orderedEdges : List Edge
-    orderedEdges =
-      edges
-        |> Set.toList
-        |> List.sortBy (\(a, b) -> (ordinalFromNode a, ordinalFromNode b))
-
   in
-    List.foldl
-      (\(a, b) (dict, (outgoing, incoming)) ->
-        let
-          aOutOrdinal = Dict.get a outgoing |> Maybe.withDefault 0
-          bInOrdinal = Dict.get b incoming |> Maybe.withDefault 0
-        in
-          ( dict |> Dict.insert (a, b) (aOutOrdinal, bInOrdinal)
-          , ( outgoing |> Dict.insert a (aOutOrdinal + 1)
-            , incoming |> Dict.insert b (bInOrdinal + 1)
-            )
-          )
-      )
-      (Dict.empty, (Dict.empty, Dict.empty))
-      orderedEdges
-    |> Tuple.first
+    edges
+      |> Set.toList
+      |> List.sortBy (\(a, b) -> (ordinalFromNode a, ordinalFromNode b))
 
 
+{-| List the first node of each topological layer.
+-}
 listTopNodes : Dict Node Int -> List Node -> List Node
-listTopNodes rankedNodes ordered =
+listTopNodes rankedNodes orderedNodes =
   List.foldl
     (\n (ns, rank) ->
       let
@@ -154,15 +174,15 @@ listTopNodes rankedNodes ordered =
           (n :: ns, nRank)
     )
     ([], -1)
-    ordered
+    orderedNodes
   |> Tuple.first
   |> List.reverse
 
 
-calculateSize : Layout -> List Node -> (Node -> Rect) -> Coord
-calculateSize { yMinSpacing, labelMaxWidth } ordered rectFromNode =
+calculateTotalSize : Layout -> List Node -> (Node -> Rect) -> Coord
+calculateTotalSize { yMinSpacing, labelMaxWidth } orderedNodes rectFromNode =
   let
-    lastRect = ordered |> List.reverse |> List.head |> Maybe.map rectFromNode |> Maybe.withDefault emptyRect
+    lastRect = orderedNodes |> List.reverse |> List.head |> Maybe.map rectFromNode |> Maybe.withDefault emptyRect
   in
     addCoord
       (rectTopRight lastRect)
@@ -173,67 +193,51 @@ view : Layout -> Paint -> AcyclicDigraph -> Html Node
 view layout paint graph =
   let
     edges = AcyclicDigraph.toEdges graph
+    outgoing = edges |> Digraph.toAdjacencyList
+    incoming = outgoing |> Digraph.transpose
+
     rankedNodes = AcyclicDigraph.topologicalRank graph
-
-    outgoing = edges |> toAdjacencyList
-    incoming = outgoing |> transpose
-
-    -- order same-rank nodes by: incoming degree (ascending), outgoing degree (descending)
-    ordered =
+    orderedNodes =
       AcyclicDigraph.topologicalSortBy
-        (\n -> (degree incoming n, degree outgoing n |> negate))
+        -- order same-rank nodes by: incoming degree (ascending), outgoing degree (descending)
+        (\n -> (incoming |> Digraph.degree n, outgoing |> Digraph.degree n |> negate))
         rankedNodes
-    topNodes = listTopNodes rankedNodes ordered
 
-    -- layout dicts
-    nodeToRect = layoutNodes layout incoming outgoing ordered
-    -- TODO order edges here, then use it in the view to render edges in order
-    edgeToConnectionOrdinals = layoutEdges edges ordered
+    orderedEdges = sortEdges orderedNodes edges
 
-    -- layout functions
-    connectionOrdinalsFromEdge = lookup (0, 0) edgeToConnectionOrdinals
+    nodeToRect = layoutNodes layout incoming outgoing orderedNodes
     rectFromNode = lookup emptyRect nodeToRect
+    edgeToEndpoints = layoutEdges layout rectFromNode orderedEdges
 
-    connectionShift : Int -> Int
-    connectionShift ordinal =
-      ordinal * layout.edgeSpacing + layout.nodePadding
-
-    (w, h) = calculateSize layout ordered rectFromNode
+    (w, h) = calculateTotalSize layout orderedNodes rectFromNode
   in
     Svg.svg
-      [ width (w |> px)
-      , height (h |> px)
+      [ Svg.Attributes.width (w |> px)
+      , Svg.Attributes.height (h |> px)
+      , Svg.Attributes.style "cursor: default;"
       ]
       [ Svg.g
-          [ transform "translate(-0.5, 0.5)"
-          , strokeLinecap "square"
+          [ Svg.Attributes.transform "translate(-0.5, 0.5)"
+          , Svg.Attributes.strokeLinecap "square"
           ]
-          (edges
-            |> Set.toList
+          (orderedEdges
             |> List.map
-                (\(n, m) ->
+                (\edge ->
                   let
-                    (nOut, mIn) = connectionOrdinalsFromEdge (n, m)
-                    nRect = rectFromNode n
-                    mRect = rectFromNode m
+                    (from, to) = Dict.get edge edgeToEndpoints |> Maybe.withDefault (origin, origin)
                   in
-                    viewOrthoConnector
-                      (paint.colorEdge (n, m))
-                      layout.edgeRadius
-                      (nRect |> rectBottomRight |> addCoord (connectionShift nOut |> negate, 0)) -- outgoing connection: from bottom-right, stack left
-                      (mRect |> rectBottomLeft |> addCoord (0, connectionShift mIn |> negate)) -- incoming connection: to bottom-left, stack up
+                    viewOrthoConnector (paint.colorEdge edge) layout.edgeRadius from to
                 )
           )
       , Svg.g
-          [ Svg.Attributes.style "cursor: default;"
-          ]
-          (ordered
+          []
+          (orderedNodes
             |> List.map
                 (viewNode layout paint rectFromNode)
           )
       , Svg.g
           []
-          (topNodes
+          (listTopNodes rankedNodes orderedNodes
             |> List.map
                 (\n ->
                   let
@@ -241,11 +245,11 @@ view layout paint graph =
                     yOffset = centeringOffset layout.yMinSpacing nRect.height
                   in
                     Svg.rect
-                      [ fill "rgba(0, 0, 0, 0.2)"
-                      , x (nRect.x + nRect.width |> px)
-                      , y (nRect.y - yOffset |> px)
-                      , width (layout.labelMaxWidth |> px)
-                      , height (1 |> px)
+                      [ Svg.Attributes.fill "rgba(0, 0, 0, 0.2)"
+                      , Svg.Attributes.x (nRect.x + nRect.width |> px)
+                      , Svg.Attributes.y (nRect.y - yOffset |> px)
+                      , Svg.Attributes.width (layout.labelMaxWidth |> px)
+                      , Svg.Attributes.height ("1px")
                       ]
                       []
                 )
@@ -260,24 +264,24 @@ viewNode layout paint toRect n =
     yOffset = centeringOffset layout.yMinSpacing nRect.height
   in
     Svg.g
-      [ transform <| translate nRect.x nRect.y
+      [ Svg.Attributes.transform <| translate nRect.x nRect.y
       ]
       [ Svg.rect
-          [ width (nRect.width |> px)
-          , height (nRect.height |> px)
-          , fill (paint.colorNode n)
+          [ Svg.Attributes.width (nRect.width |> px)
+          , Svg.Attributes.height (nRect.height |> px)
+          , Svg.Attributes.fill (paint.colorNode n)
           ]
           []
       , Svg.g
-          [ transform <| translate nRect.width (nRect.height // 2 + 2) ]
+          [ Svg.Attributes.transform <| translate nRect.width (nRect.height // 2 + 2) ]
           [ n |> paint.viewLabel
           ]
       , Svg.rect
-          [ y (negate yOffset |> px)
-          , width (nRect.width + layout.labelMaxWidth |> px)
-          , height (max layout.yMinSpacing nRect.height |> px)
-          , fill "transparent"
-          , onClick n
+          [ Svg.Attributes.y (negate yOffset |> px)
+          , Svg.Attributes.width (nRect.width + layout.labelMaxWidth |> px)
+          , Svg.Attributes.height (max layout.yMinSpacing nRect.height |> px)
+          , Svg.Attributes.fill "transparent"
+          , Svg.Events.onClick n
           ]
           []
       ]
@@ -286,9 +290,9 @@ viewNode layout paint toRect n =
 viewOrthoConnector : String -> Int -> Coord -> Coord -> Svg a
 viewOrthoConnector color radius from to =
   Svg.path
-    [ stroke color
-    , fill "transparent"
-    , d (pathOrthoConnector radius from to)
+    [ Svg.Attributes.stroke color
+    , Svg.Attributes.fill "transparent"
+    , Svg.Attributes.d (pathOrthoConnector radius from to)
     ]
     []
 
@@ -323,6 +327,11 @@ translate x y =
 
 type alias Coord =
   (Int, Int)
+
+
+origin : Coord
+origin =
+  (0, 0)
 
 
 addCoord : Coord -> Coord -> Coord

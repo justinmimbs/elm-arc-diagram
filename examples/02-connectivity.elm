@@ -1,15 +1,16 @@
 import AcyclicDigraph exposing (Node, Edge, Cycle, AcyclicDigraph)
-import Diagram
-import DiagramConnectivity as Diagram
-import Set exposing (Set)
+import ArcDiagram
+import ArcDiagram.Connectivity
 import Dict exposing (Dict)
 import Html exposing (Html)
+import Html.Attributes
+import Set exposing (Set)
 
 
 main : Program Never Model Node
 main =
   Html.beginnerProgram
-    { model =  Model exampleEdges exampleLabels Nothing
+    { model = Model exampleEdges exampleLabels Nothing
     , update = update
     , view = view
     }
@@ -27,45 +28,62 @@ update node model =
   { model | selectedNode = model.selectedNode |> toggleMaybe node }
 
 
-defaultLayout =  Diagram.defaultLayout
+defaultLayout =
+  ArcDiagram.defaultLayout
 
 
-layout : Diagram.Layout
+layout : ArcDiagram.Layout
 layout =
   { defaultLayout
-    | edgeRadius = 200
-    , labelMaxWidth = 60
+    | labelMaxWidth = 60
   }
 
 
 view : Model -> Html Node
 view { edges, labels, selectedNode } =
   let
-    toLabel = (flip Dict.get) labels >> Maybe.withDefault ""
-  in
-    case AcyclicDigraph.fromEdges edges of
-      Err cycles ->
-        Html.div
-          []
-          [ Html.text "Graph has the following cycles:"
-          , Html.ol
-              []
-              (cycles |> List.map (viewCycle toLabel))
-          ]
+    toLabel =
+      (flip Dict.get) labels >> Maybe.withDefault ""
 
-      Ok graph ->
-        let
-          paint =
-            selectedNode
-              |> Maybe.map
-                  (Diagram.basicPaintConnectivity toLabel graph)
-              |> Maybe.withDefault
-                  (Diagram.basicPaint toLabel)
-        in
-          Diagram.view
-            layout
-            paint
-            graph
+    graphView =
+      case AcyclicDigraph.fromEdges edges of
+        Err cycles ->
+          viewCycles toLabel cycles
+
+        Ok graph ->
+          let
+            paint =
+              selectedNode
+                |> Maybe.map
+                    (ArcDiagram.Connectivity.basicPaint toLabel graph)
+                |> Maybe.withDefault
+                    (ArcDiagram.basicPaint toLabel)
+          in
+            ArcDiagram.view
+              layout
+              paint
+              graph
+
+  in
+    Html.div
+      [ Html.Attributes.style
+          [ ("margin", "40px")
+          , ("font-family", "Helvetica, Arial, san-serif")
+          ]
+      ]
+      [ graphView
+      ]
+
+
+viewCycles : (Node -> String) -> List Cycle -> Html a
+viewCycles toLabel cycles =
+  Html.div
+    []
+    [ Html.text "Graph has the following cycles:"
+    , Html.ol
+        []
+        (cycles |> List.map (viewCycle toLabel))
+    ]
 
 
 viewCycle : (Node -> String) -> Cycle -> Html a
@@ -83,7 +101,7 @@ toggleMaybe a ma =
     Just a
 
 
---
+-- example data
 
 exampleEdges : Set Edge
 exampleEdges =

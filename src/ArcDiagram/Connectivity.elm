@@ -1,12 +1,12 @@
-module DiagramConnectivity exposing
-  ( paintConnectivity
-  , basicPaintConnectivity
+module ArcDiagram.Connectivity exposing
+  ( Distance
+  , paint, basicPaint, defaultPaint
   )
 
-import AcyclicDigraph exposing (AcyclicDigraph)
+import AcyclicDigraph exposing (AcyclicDigraph, Node, Edge)
+import ArcDiagram exposing (Paint)
 import Dict exposing (Dict)
-import Diagram
-import Digraph exposing (Node, Edge)
+import Digraph
 import Html exposing (Html)
 import Set exposing (Set)
 import Svg exposing (Svg)
@@ -17,7 +17,8 @@ type alias Distance =
   Maybe Int
 
 
-paintConnectivity viewLabel colorNode colorEdge graph node =
+paint : { viewLabel : (Node -> Distance -> Svg Node), colorNode : (Node -> Distance -> String), colorEdge : (Edge -> Distance -> String) } -> AcyclicDigraph -> Node -> Paint
+paint { viewLabel, colorNode, colorEdge } graph node =
   let
     outgoing = graph |> AcyclicDigraph.toEdges |> Digraph.toAdjacencyList
     incoming = Digraph.transpose outgoing
@@ -33,12 +34,20 @@ paintConnectivity viewLabel colorNode colorEdge graph node =
       }
 
 
---basicPaintConnectivity : (Node -> String) -> AcyclicDigraph -> Node -> Paint
-basicPaintConnectivity toLabel =
-  paintConnectivity
-    (\n d -> viewLabelDimmed (isNothing d) (toLabel n))
-    (always colorFromDistance)
-    (always colorFromDistance)
+defaultPaint : { viewLabel : (Node -> Distance -> Svg Node), colorNode : (Node -> Distance -> String), colorEdge : (Edge -> Distance -> String) }
+defaultPaint =
+  { viewLabel = (\n d -> viewLabelDimmed (isNothing d) (toString n))
+  , colorNode = (always colorFromDistance)
+  , colorEdge = (always colorFromDistance)
+  }
+
+
+basicPaint : (Node -> String) -> AcyclicDigraph -> Node -> Paint
+basicPaint toLabel =
+  paint
+    { defaultPaint
+      | viewLabel = \n d -> viewLabelDimmed (isNothing d) (toLabel n)
+    }
 
 
 viewLabelDimmed : Bool -> String -> Svg a
@@ -52,6 +61,14 @@ viewLabelDimmed isDimmed string =
     ]
     [ Svg.text string
     ]
+
+
+labelColor : Bool -> String
+labelColor isDimmed =
+  if isDimmed then
+    "rgb(200, 200, 200)"
+  else
+    "black"
 
 
 distanceForEdge : Dict Node Int -> Edge -> Distance
@@ -68,14 +85,6 @@ distanceForEdge distancesFrom (a, b) =
     (Dict.get a distancesFrom)
     (Dict.get b distancesFrom)
   |> Maybe.withDefault Nothing
-
-
-labelColor : Bool -> String
-labelColor isDimmed =
-  if isDimmed then
-    "rgb(200, 200, 200)"
-  else
-    "black"
 
 
 colorFromDistance : Distance -> String

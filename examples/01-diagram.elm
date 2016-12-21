@@ -1,8 +1,9 @@
 import AcyclicDigraph exposing (Node, Edge, Cycle, AcyclicDigraph)
-import Diagram
-import Set exposing (Set)
+import ArcDiagram
 import Dict exposing (Dict)
 import Html exposing (Html)
+import Html.Attributes
+import Set exposing (Set)
 
 
 main : Program Never Model Node
@@ -21,23 +22,40 @@ type alias Model =
 view : Model -> Html Node
 view (edges, labels) =
   let
-    toLabel = (flip Dict.get) labels >> Maybe.withDefault ""
-  in
-    case AcyclicDigraph.fromEdges edges of
-      Err cycles ->
-        Html.div
-          []
-          [ Html.text "Graph has the following cycles:"
-          , Html.ol
-              []
-              (cycles |> List.map (viewCycle toLabel))
-          ]
+    toLabel =
+      (flip Dict.get) labels >> Maybe.withDefault ""
 
-      Ok graph ->
-        Diagram.view
-          Diagram.defaultLayout
-          (Diagram.basicPaint toLabel)
-          graph
+    graphView =
+      case AcyclicDigraph.fromEdges edges of
+        Err cycles ->
+          viewCycles toLabel cycles
+
+        Ok graph ->
+          ArcDiagram.view
+            ArcDiagram.defaultLayout
+            (ArcDiagram.basicPaint toLabel)
+            graph
+
+  in
+    Html.div
+      [ Html.Attributes.style
+          [ ("margin", "40px")
+          , ("font-family", "Helvetica, Arial, san-serif")
+          ]
+      ]
+      [ graphView
+      ]
+
+
+viewCycles : (Node -> String) -> List Cycle -> Html a
+viewCycles toLabel cycles =
+  Html.div
+    []
+    [ Html.text "Graph has the following cycles:"
+    , Html.ol
+        []
+        (cycles |> List.map (viewCycle toLabel))
+    ]
 
 
 viewCycle : (Node -> String) -> Cycle -> Html a
@@ -47,7 +65,7 @@ viewCycle toLabel cycle =
     [ Html.text (cycle |> List.map toLabel |> String.join " -> ") ]
 
 
---
+-- example data
 
 exampleEdges : Set Edge
 exampleEdges =

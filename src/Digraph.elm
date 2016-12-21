@@ -29,9 +29,6 @@ type alias AdjacencyList =
   Dict Node (Set Node)
 
 
--- TODO organize this module better in regard to functions that work on edges vs adjList
-
-
 {-| Convert a set of edges to a mapping of (x node -> set of y nodes).
 -}
 toAdjacencyList : Set Edge -> AdjacencyList
@@ -169,12 +166,11 @@ isSimpleCycle path =
   |> Maybe.withDefault False
 
 
-degree : AdjacencyList -> Node -> Int
-degree adjList =
-  (flip Dict.get) adjList >> Maybe.map Set.size >> Maybe.withDefault 0
+degree : Node -> AdjacencyList -> Int
+degree n =
+  successors n >> Set.size
 
 
--- TODO flip args, like `degree`, for convenience of typical use over convention? otherwise, flip `degree` for consistency
 successors : Node -> AdjacencyList -> Set Node
 successors n =
   Dict.get n >> Maybe.withDefault Set.empty
