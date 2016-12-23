@@ -4,6 +4,26 @@ module ArcDiagram exposing
   , Paint, basicPaint, defaultPaint
   )
 
+{-| Visualize an acyclic digraph as an arc diagram.
+
+@docs view
+
+
+## Layout
+
+Represents values, in pixels, used to layout the diagram.
+
+@docs Layout, defaultLayout
+
+
+## Paint
+
+Represents functions used to draw labels and set the color for each node
+and edge.
+
+@docs Paint, defaultPaint, basicPaint
+-}
+
 import AcyclicDigraph exposing (Node, Edge, AcyclicDigraph)
 import Dict exposing (Dict)
 import Digraph exposing (AdjacencyList)
@@ -15,25 +35,51 @@ import Svg.Attributes
 import Svg.Events
 
 
+{-|
+- `nodePadding`: Nodes are drawn as rectangles tall enough to fit their
+  incoming connections and wide enough to fit their outgoing connections. This
+  determines how much padding to give nodes in addition to the minimum
+  dimensions required to fit their edge connections.
+- `edgeSpacing`: Edges are drawn as 1px lines, and they do not overlap when
+  connecting to a node. This determines the spacing between each edge
+  connection.
+- `edgeRadius`: Edges are drawn as L-shaped connections with rounded corners.
+  This determines the corner radius. It can be set to a high number to give the
+  look of a more traditional arc diagram.
+- `labelWidth`: The width for each label.
+- `labelMinHeight`: The minimum height for each label. This ensures space for
+  labels when their node heights are otherwise too small.
+-}
 type alias Layout =
-  { edgeSpacing : Int
-  , nodePadding : Int
-  , yMinSpacing : Int
+  { nodePadding : Int
+  , edgeSpacing : Int
   , edgeRadius : Int
-  , labelMaxWidth : Int
+  , labelWidth : Int
+  , labelMinHeight : Int
   }
 
 
+{-|
+    { nodePadding = 4
+    , edgeSpacing = 2
+    , edgeRadius = 4
+    , labelWidth = 100
+    , labelMinHeight = 20
+    }
+-}
 defaultLayout : Layout
 defaultLayout =
-  { edgeSpacing = 2
-  , nodePadding = 4
-  , yMinSpacing = 20
+  { nodePadding = 4
+  , edgeSpacing = 2
   , edgeRadius = 4
-  , labelMaxWidth = 100
+  , labelWidth = 100
+  , labelMinHeight = 20
   }
 
 
+{-| Color is represented as a string, and should be a
+[CSS color value](https://developer.mozilla.org/en-US/docs/Web/CSS/color_value).
+-}
 type alias Paint =
   { viewLabel : Node -> Svg Node
   , colorNode : Node -> String
@@ -41,6 +87,9 @@ type alias Paint =
   }
 
 
+{-| The `defaultPaint` will color nodes black, edges gray, and draw labels
+displaying the integer represention of each node.
+-}
 defaultPaint : Paint
 defaultPaint =
   { viewLabel = toString >> viewLabel
@@ -49,6 +98,15 @@ defaultPaint =
   }
 
 
+{-| Get a `Paint` value that uses the default colors and your own label text,
+by providing a _toLabel_ function that determines the label text for each node.
+
+    view : (Node -> String) -> AcyclicDigraph -> Html Node
+    view toLabel =
+      ArcDiagram.view
+        ArcDiagram.defaultLayout
+        (ArcDiagram.basicPaint toLabel)
+-}
 basicPaint : (Node -> String) -> Paint
 basicPaint toLabel =
   { defaultPaint | viewLabel = toLabel >> viewLabel }
@@ -66,7 +124,6 @@ viewLabel string =
     ]
 
 
--- lookup: flip (Dict.getWithDefault v))
 lookup : v -> Dict comparable v -> comparable -> v
 lookup default dict =
   (flip Dict.get) dict >> Maybe.withDefault default
@@ -78,7 +135,7 @@ centeringOffset outer inner =
 
 
 layoutNodes : Layout -> AdjacencyList -> AdjacencyList -> List Node -> Dict Node Rect
-layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing orderedNodes =
+layoutNodes { edgeSpacing, nodePadding, labelMinHeight } incoming outgoing orderedNodes =
   List.foldl
     (\n ((cursorX, cursorY), dict) ->
       let
@@ -86,7 +143,7 @@ layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing orderedN
         outdegree = outgoing |> Digraph.degree n
         width = (outdegree * edgeSpacing + nodePadding * 2)
         height = (indegree * edgeSpacing + nodePadding * 2)
-        yOffset = centeringOffset yMinSpacing height -- center rect within yMinSpacing
+        yOffset = centeringOffset labelMinHeight height -- center rect within labelMinHeight
         rect =
           Rect
             cursorX
@@ -94,7 +151,7 @@ layoutNodes { edgeSpacing, nodePadding, yMinSpacing } incoming outgoing orderedN
             width
             height
       in
-        ( (cursorX + rect.width, cursorY + (max yMinSpacing rect.height))
+        ( (cursorX + rect.width, cursorY + (max labelMinHeight rect.height))
         , dict |> Dict.insert n rect
         )
     )
@@ -141,7 +198,7 @@ layoutEdges layout toRect orderedEdges =
           )
 
 
-{-| Sort a set of edges based on the provided ordering of nodes.
+{-| Sort a set of edges based on an ordering of nodes.
 -}
 sortEdges : List Node -> Set Edge -> List Edge
 sortEdges orderedNodes edges =
@@ -180,15 +237,31 @@ listTopNodes rankedNodes orderedNodes =
 
 
 calculateTotalSize : Layout -> List Node -> (Node -> Rect) -> Coord
-calculateTotalSize { yMinSpacing, labelMaxWidth } orderedNodes rectFromNode =
+calculateTotalSize { labelMinHeight, labelWidth } orderedNodes rectFromNode =
   let
     lastRect = orderedNodes |> List.reverse |> List.head |> Maybe.map rectFromNode |> Maybe.withDefault emptyRect
   in
     addCoord
       (rectTopRight lastRect)
-      (labelMaxWidth, max yMinSpacing lastRect.height)
+      (labelWidth, max labelMinHeight lastRect.height)
 
 
+{-| Create an arc diagram with the specified layout and paint options. The
+view produces `Node` messages when a node or its label are clicked by the user.
+
+    type Msg
+      = ToggleNode Node
+      | ...
+
+
+    view : AcyclicDigraph -> Html Msg
+    view graph =
+      graph
+        |> ArcDiagram.view
+            ArcDiagram.defaultLayout
+            ArcDiagram.defaultPaint
+        |> Html.map ToggleNode
+-}
 view : Layout -> Paint -> AcyclicDigraph -> Html Node
 view layout paint graph =
   let
@@ -242,13 +315,13 @@ view layout paint graph =
                 (\n ->
                   let
                     nRect = rectFromNode n
-                    yOffset = centeringOffset layout.yMinSpacing nRect.height
+                    yOffset = centeringOffset layout.labelMinHeight nRect.height
                   in
                     Svg.rect
                       [ Svg.Attributes.fill "rgba(0, 0, 0, 0.2)"
                       , Svg.Attributes.x (nRect.x + nRect.width |> px)
                       , Svg.Attributes.y (nRect.y - yOffset |> px)
-                      , Svg.Attributes.width (layout.labelMaxWidth |> px)
+                      , Svg.Attributes.width (layout.labelWidth |> px)
                       , Svg.Attributes.height ("1px")
                       ]
                       []
@@ -261,7 +334,7 @@ viewNode : Layout -> Paint -> (Node -> Rect) -> Node -> Svg Node
 viewNode layout paint toRect n =
   let
     nRect = n |> toRect
-    yOffset = centeringOffset layout.yMinSpacing nRect.height
+    yOffset = centeringOffset layout.labelMinHeight nRect.height
   in
     Svg.g
       [ Svg.Attributes.transform <| translate nRect.x nRect.y
@@ -278,8 +351,8 @@ viewNode layout paint toRect n =
           ]
       , Svg.rect
           [ Svg.Attributes.y (negate yOffset |> px)
-          , Svg.Attributes.width (nRect.width + layout.labelMaxWidth |> px)
-          , Svg.Attributes.height (max layout.yMinSpacing nRect.height |> px)
+          , Svg.Attributes.width (nRect.width + layout.labelWidth |> px)
+          , Svg.Attributes.height (max layout.labelMinHeight nRect.height |> px)
           , Svg.Attributes.fill "transparent"
           , Svg.Events.onClick n
           ]

@@ -1,7 +1,23 @@
-module ArcDiagram.Connectivity exposing
-  ( Distance
-  , paint, basicPaint, defaultPaint
+module ArcDiagram.Distance exposing
+  ( Distance, DistancePaint
+  , paint, basicPaint, defaultDistancePaint
   )
+
+{-| This module provides convenience functions for creating `ArcDiagram.Paint`
+values that will color nodes and edges based on _distance_ from a given node.
+This is useful for highlighting the subgraph which is reachable from a
+given node.
+
+
+## Distance
+
+@docs Distance
+
+
+## Paint
+
+@docs basicPaint, DistancePaint, defaultDistancePaint, paint
+-}
 
 import AcyclicDigraph exposing (AcyclicDigraph, Node, Edge)
 import ArcDiagram exposing (Paint)
@@ -13,11 +29,54 @@ import Svg exposing (Svg)
 import Svg.Attributes
 
 
+{-| Represents the distance between two nodes. A value of `Just number`
+indicates the number of edges in a shortest path connecting the nodes. A value
+of `Nothing` means there is no path connecting the nodes.
+
+Unconventionally, the number may be negative, which indicates there is a path
+in the reverse direction. This way `Distance` can represent both forward and
+backward connections.
+-}
 type alias Distance =
   Maybe Int
 
 
-paint : { viewLabel : (Node -> Distance -> Svg Node), colorNode : (Node -> Distance -> String), colorEdge : (Edge -> Distance -> String) } -> AcyclicDigraph -> Node -> Paint
+{-| Similar to `Paint`, but each function also takes a `Distance` argument.
+-}
+type alias DistancePaint =
+  { viewLabel : (Node -> Distance -> Svg Node)
+  , colorNode : (Node -> Distance -> String)
+  , colorEdge : (Edge -> Distance -> String)
+  }
+
+
+{-| Get a `Paint` value from a `DistancePaint` value, a graph, and a node.
+
+    colorFromDistance : Distance -> String
+    colorFromDistance distance =
+      case distance of
+        Just _ ->
+          "black"
+
+        Nothing ->
+          "lightgray"
+
+
+    view : AcyclicDigraph -> Node -> Html Node
+    view graph node =
+      ArcDiagram.view
+        ArcDiagram.defaultLayout
+        (ArcDiagram.Distance.paint
+          { viewLabel = \n d -> viewColorLabel (colorFromDistance d) (toLabel n)
+          , colorNode = always colorFromDistance
+          , colorEdge = always colorFromDistance
+          }
+          graph
+          node
+        )
+        graph
+-}
+paint : DistancePaint -> AcyclicDigraph -> Node -> Paint
 paint { viewLabel, colorNode, colorEdge } graph node =
   let
     outgoing = graph |> AcyclicDigraph.toEdges |> Digraph.toAdjacencyList
@@ -34,18 +93,33 @@ paint { viewLabel, colorNode, colorEdge } graph node =
       }
 
 
-defaultPaint : { viewLabel : (Node -> Distance -> Svg Node), colorNode : (Node -> Distance -> String), colorEdge : (Edge -> Distance -> String) }
-defaultPaint =
-  { viewLabel = (\n d -> viewLabelDimmed (isNothing d) (toString n))
-  , colorNode = (always colorFromDistance)
-  , colorEdge = (always colorFromDistance)
+{-| The `defaultDistancePaint` will color connected nodes and edges blue or red
+(for forward or backward connections), and color unconnected nodes, edges, and
+labels light gray.
+-}
+defaultDistancePaint : DistancePaint
+defaultDistancePaint =
+  { viewLabel = \n d -> viewLabelDimmed (isNothing d) (toString n)
+  , colorNode = always colorFromDistance
+  , colorEdge = always colorFromDistance
   }
 
 
+{-| Get a `Paint` value that uses the `defaultDistancePaint` coloring and your
+own label text, by providing a _toLabel_ function, a graph, and a node.
+
+    ArcDiagram.view
+      ArcDiagram.defaultLayout
+      (ArcDiagram.Distance.basicPaint toLabel graph node)
+      graph
+
+See the [Selectable Node](https://github.com/justinmimbs/elm-arc-diagram)
+example for more detail.
+-}
 basicPaint : (Node -> String) -> AcyclicDigraph -> Node -> Paint
 basicPaint toLabel =
   paint
-    { defaultPaint
+    { defaultDistancePaint
       | viewLabel = \n d -> viewLabelDimmed (isNothing d) (toLabel n)
     }
 

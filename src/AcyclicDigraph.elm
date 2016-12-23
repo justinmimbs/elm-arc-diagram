@@ -6,27 +6,57 @@ module AcyclicDigraph exposing
   , topologicalSortBy
   )
 
+{-|
+## Type aliases
+
+The following type aliases are used to make type annotations more meaningful.
+
+@docs Node, Edge, Cycle
+
+
+## AcyclicDigraph
+
+@docs AcyclicDigraph, fromEdges, toEdges
+
+
+## Topological sorting
+
+@docs topologicalRank, topologicalSortBy
+-}
+
 import Dict exposing (Dict)
 import Digraph
 import Set exposing (Set)
 
 
+{-|
+-}
 type alias Node =
-  Digraph.Node
+  Int
 
 
+{-|
+-}
 type alias Edge =
-  Digraph.Edge
+  (Node, Node)
 
 
+{-|
+-}
 type alias Cycle =
   List Node
 
 
+{-| Represents a directed graph with no cycles.
+-}
 type AcyclicDigraph =
   AcyclicDigraph (Set Edge)
 
 
+{-| From a directed graph represented as a set of edges, get an
+`AcyclicDigraph` if the graph has no cycles; otherwise, get a list of all
+its simple cycles.
+-}
 fromEdges : Set Edge -> Result (List Cycle) AcyclicDigraph
 fromEdges edges =
   case Digraph.findCycles edges of
@@ -36,6 +66,8 @@ fromEdges edges =
       Err cycles
 
 
+{-| From an `AcyclicDigraph`, get its representation as a set of edges.
+-}
 toEdges : AcyclicDigraph -> Set Edge
 toEdges (AcyclicDigraph edges) =
   edges
@@ -50,8 +82,8 @@ sourceNodes edges =
     (edges |> Set.map Tuple.second)
 
 
-{-| From a set of edges, get a dictionary of (node -> topological rank) if the
-edges are acyclic.
+{-| Get a dictionary mapping node to topological rank. Rank numbering starts at
+1 for all source nodes.
 -}
 topologicalRank : AcyclicDigraph -> Dict Node Int
 topologicalRank (AcyclicDigraph edges) =
@@ -101,8 +133,8 @@ topologicalRankHelp rank addNodes edges rankedNodes =
         newRankedNodes
 
 
-{-| From topologically-ranked nodes, get a well-ordered list by providing a
-(Node -> comparable) function to sort same-ranked nodes by.
+{-| From topologically-ranked nodes, get a well-ordered list of nodes by
+providing a `(Node -> comparable)` function to sort same-ranked nodes by.
 -}
 topologicalSortBy : (Node -> comparable) -> Dict Node Int -> List Node
 topologicalSortBy toComparable =

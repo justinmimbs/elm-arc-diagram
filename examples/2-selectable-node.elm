@@ -1,6 +1,6 @@
 import AcyclicDigraph exposing (Node, Edge, Cycle, AcyclicDigraph)
 import ArcDiagram
-import ArcDiagram.Connectivity
+import ArcDiagram.Distance
 import Dict exposing (Dict)
 import Html exposing (Html)
 import Html.Attributes
@@ -35,7 +35,7 @@ defaultLayout =
 layout : ArcDiagram.Layout
 layout =
   { defaultLayout
-    | labelMaxWidth = 60
+    | labelWidth = 60
   }
 
 
@@ -55,7 +55,7 @@ view { edges, labels, selectedNode } =
             paint =
               selectedNode
                 |> Maybe.map
-                    (ArcDiagram.Connectivity.basicPaint toLabel graph)
+                    (ArcDiagram.Distance.basicPaint toLabel graph)
                 |> Maybe.withDefault
                     (ArcDiagram.basicPaint toLabel)
           in
